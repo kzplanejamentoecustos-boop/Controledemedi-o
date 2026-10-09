@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Controle de Medição – Rev09</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#16324F; --steel:#3E6A92; --concrete:#EEF0F2; --line:#D3D8DE;
+  --ink:#1B232C; --muted:#5E6B78; --consumo:#D98E04; --saldo:#2E7D6B; --alerta:#B3261E;
+  --white:#fff;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"IBM Plex Sans",Segoe UI,Arial,sans-serif;color:var(--ink);background:var(--concrete);font-size:14px}
+header{background:var(--navy);color:#fff;padding:12px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+#logoBox{width:120px;height:44px;border:1px dashed rgba(255,255,255,.5);border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;color:rgba(255,255,255,.75);overflow:hidden;background:rgba(255,255,255,.06)}
+#logoBox img{max-width:100%;max-height:100%}
+header h1{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",Arial,sans-serif;font-size:20px;font-weight:600;margin:0;flex:1}
+header .acts{display:flex;gap:8px}
+/* menu principal */
+.mwrap{position:relative}
+#btnMenu{display:flex;align-items:center;gap:8px}
+#btnMenu .ic{display:inline-flex;flex-direction:column;gap:3px}
+#btnMenu .ic i{display:block;width:16px;height:2px;background:currentColor}
+#menu{position:absolute;top:calc(100% + 8px);left:0;background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px rgba(15,25,35,.18);width:260px;padding:6px;display:none;z-index:20}
+#menu.on{display:block}
+#menu .it{display:flex;justify-content:space-between;align-items:center;width:100%;border:0;background:none;text-align:left;font:inherit;font-weight:500;padding:10px 12px;border-radius:4px;cursor:pointer;color:var(--ink)}
+#menu .it:hover,#menu .sub button:hover{background:var(--concrete)}
+#menu .it.on,#menu .sub button.on{color:var(--navy);box-shadow:inset 3px 0 0 var(--consumo)}
+#menu .it .ch{transition:transform .15s;color:var(--muted)}
+#menu .grp.open>.it .ch{transform:rotate(90deg)}
+#menu .sub{display:none;padding:2px 0 6px 12px}
+#menu .grp.open .sub{display:block}
+#menu .sub button{display:block;width:100%;border:0;background:none;text-align:left;font:inherit;padding:8px 12px;border-radius:4px;cursor:pointer;color:var(--ink)}
+#menu .sub .vz{font-size:12px;color:var(--muted);padding:6px 12px}
+#menu hr{border:0;border-top:1px solid var(--line);margin:6px 0}
+.crumb{background:#fff;border-bottom:1px solid var(--line);padding:10px 24px;font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.crumb a{color:var(--steel);cursor:pointer;text-decoration:underline}
+.crumb b{color:var(--ink);font-weight:600}
+main{padding:20px 24px;max-width:1400px;margin:0 auto}
+.tab{display:none}.tab.on{display:block}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.bar h2{margin:0;font-size:17px;flex:1}
+button.b{border:1px solid var(--steel);background:var(--steel);color:#fff;padding:7px 14px;border-radius:4px;font:inherit;font-weight:500;cursor:pointer}
+button.b.sec{background:#fff;color:var(--steel)}
+button.b.dan{background:#fff;color:var(--alerta);border-color:var(--alerta)}
+button.b.sm{padding:4px 9px;font-size:12px}
+header button.b{background:transparent;border-color:rgba(255,255,255,.6)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--consumo);outline-offset:2px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:16px}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:var(--muted);border-bottom:2px solid var(--line);padding:8px;white-space:nowrap}
+td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:middle}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.tot td{font-weight:700;border-top:2px solid var(--line)}
+.empty{color:var(--muted);padding:24px;text-align:center}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#E4ECF5;color:var(--steel)}
+.tag.ad{background:#FCEFD6;color:#8A5A00}
+tr.det>td{background:#F6F8FA;padding:10px 12px 14px}
+tr.det table{background:#fff;border:1px solid var(--line)}
+tr.det th{font-size:12px}
+.xp{display:inline-block;width:12px;transition:transform .15s}.xp.on{transform:rotate(90deg)}
+td input[type=date]{padding:4px 6px;font-size:12px}
+.auto{color:var(--muted);font-size:11px}
+.sig{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.sig i{width:12px;height:12px;border-radius:50%;display:inline-block}
+.sig.ok{color:var(--saldo)}.sig.ok i{background:#1E9E5A}
+.sig.no{color:var(--alerta)}.sig.no i{background:var(--alerta)}
+#tbFluxo th.g{text-align:center;border-bottom:1px solid var(--line);color:var(--navy)}
+/* controle de envio em tela cheia */
+main.full{max-width:none;padding-left:16px;padding-right:16px}
+#tbFluxo{font-size:12px}
+#tbFluxo th{white-space:normal;vertical-align:bottom;padding:6px 5px;font-size:11.5px;line-height:1.25}
+#tbFluxo td{padding:5px}
+#tbFluxo td input[type=date]{width:100%;min-width:112px;font-size:11.5px;padding:3px 4px}
+#tbFluxo td input[type=text]{width:100%;min-width:150px;font-size:12px;padding:4px 6px}
+#tbFluxo td.nw{white-space:nowrap}
+.neg{color:var(--alerta);font-weight:600}
+select,input,textarea{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
+input.num{text-align:right;width:120px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:500}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px}
+/* modal */
+.ov{position:fixed;inset:0;background:rgba(15,25,35,.5);display:none;align-items:flex-start;justify-content:center;padding:30px 12px;overflow-y:auto;z-index:10}
+.ov.on{display:flex}
+.md{background:#fff;border-radius:6px;width:100%;max-width:1050px;padding:20px}
+.md h3{margin:0 0 14px;font-size:17px}
+.md .ft{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap}
+.msg{font-size:12px;padding:8px 10px;border-radius:4px;margin-top:8px;display:none}
+.msg.on{display:block}
+.msg.warn{background:#FDECEA;color:var(--alerta)}
+.msg.ok{background:#E6F2EF;color:var(--saldo)}
+/* setor de medição */
+.stabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;overflow-x:auto}
+.stabs button{border:0;background:none;padding:10px 14px;font:inherit;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent}
+.stabs button.on{color:var(--navy);border-bottom-color:var(--consumo)}
+.spane{display:none}.spane.on{display:block}
+.kv{background:var(--concrete);border-radius:4px;padding:10px 12px;font-size:12px;color:var(--muted)}
+.kv b{display:block;font-size:15px;color:var(--ink);margin-top:2px}
+/* acompanhamento */
+.hero{background:#fff;border:1px solid var(--line);border-radius:6px;padding:20px;margin-bottom:16px}
+.hero .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+.hero .pct{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",Arial,sans-serif;font-size:44px;font-weight:600;color:var(--navy);line-height:1}
+.hero .pct small{font-size:14px;color:var(--muted);font-weight:500;margin-left:6px}
+.track{height:26px;background:#E3E7EB;border-radius:3px;overflow:hidden;display:flex;margin:14px 0 10px}
+.track .c{background:var(--consumo)}.track .s{background:var(--saldo)}.track .x{background:var(--alerta)}
+.legend{display:flex;gap:22px;flex-wrap:wrap;font-size:13px}
+.legend span b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+.chart .row{display:grid;grid-template-columns:minmax(120px,240px) 1fr 90px;gap:10px;align-items:center;margin:8px 0;font-size:13px}
+.chart .row .lb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chart .row .tr{height:18px;background:#E3E7EB;border-radius:2px;display:flex;overflow:hidden}
+.chart .row .tr div{height:100%}
+.chart .row .pv{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.chart .sc{font-size:11px;color:var(--muted);margin:0 0 4px}
+@media (max-width:640px){main{padding:14px}.chart .row{grid-template-columns:1fr 70px}.chart .row .tr{grid-column:1/-1;order:3}}
+@media print{header .acts,.mwrap,.crumb,.bar button,.ov{display:none!important}.tab{display:block!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="mwrap">
+    <button class="b" id="btnMenu" aria-expanded="false" aria-controls="menu"><span class="ic"><i></i><i></i><i></i></span>Menu</button>
+    <div id="menu" role="menu">
+      <button class="it" data-go="tResumo">Resumo</button>
+      <hr>
+      <div class="grp"><button class="it" data-grp>Medição <span class="ch">›</span></button>
+        <div class="sub"><button data-go="tContratos">Contratos</button><button data-go="tMedicoes">Medições</button><button data-go="tFluxo">Controle de envio</button></div></div>
+      <div class="grp"><button class="it" data-grp>Faturamento <span class="ch">›</span></button>
+        <div class="sub"><div class="vz">Opções a definir</div></div></div>
+      <div class="grp"><button class="it" data-grp>Adiantamento <span class="ch">›</span></button>
+        <div class="sub"><div class="vz">Opções a definir</div></div></div>
+    </div>
+  </div>
+  <div id="logoBox" title="Clique para carregar o logo">Carregar logo</div>
+  <h1>Controle de Medição de Fornecedores</h1>
+  <div class="acts">
+    <button class="b" onclick="abrirSetor()">Setor de medição</button>
+    <input type="file" id="fImp" accept=".json" hidden>
+    <input type="file" id="fLogo" accept="image/*" hidden>
+  </div>
+</header>
+<div class="crumb" id="crumb"></div>
+
+<main>
+<!-- CONTRATOS -->
+<section id="tContratos" class="tab">
+  <div class="bar"><h2>Contratos cadastrados</h2><button class="b" onclick="abrirContrato()">Novo contrato</button></div>
+  <div class="panel tw"><table id="tbContratos"></table></div>
+</section>
+
+<!-- MEDIÇÕES -->
+<section id="tMedicoes" class="tab">
+  <div class="bar"><h2>Medições lançadas</h2>
+    <select id="fMedCt" onchange="rMedicoes()"></select>
+    <button class="b" onclick="abrirMedicao()">Nova medição</button></div>
+  <div class="panel tw"><table id="tbMedicoes"></table></div>
+</section>
+
+<!-- ACOMPANHAMENTO -->
+<section id="tFluxo" class="tab">
+  <div class="bar"><h2>Controle de envio das medições – todos os fornecedores</h2>
+    <select id="fFluxForn" onchange="rFluxo()"></select></div>
+  <div class="panel tw"><table id="tbFluxo"></table>
+  <p class="auto" style="margin:10px 0 0">Status verde = todos os campos de preenchimento da linha informados.</p></div>
+</section>
+
+<section id="tResumo" class="tab on">
+  <div class="bar"><h2>Resumo dos contratos – contratado × consumido × saldo</h2>
+    <select id="fAcCt" onchange="rAcomp()"></select></div>
+  <div id="acHero"></div>
+  <div class="panel tw"><h3 style="margin:0 0 10px;font-size:15px" id="acListaTit"></h3><table id="tbAcomp"></table></div>
+  <div class="panel chart" id="acChart"></div>
+</section>
+</main>
+
+<!-- MODAL CONTRATO -->
+<div class="ov" id="mdContrato"><div class="md">
+  <h3 id="mdCtTit">Novo contrato</h3>
+  <div class="grid">
+    <label class="f">Nº do contrato<input id="ctNum"></label>
+    <label class="f">Fornecedor<input id="ctForn"></label>
+    <label class="f">CNPJ<input id="ctCnpj"></label>
+    <label class="f">Data de assinatura<input type="date" id="ctData"></label>
+    <label class="f">Valor do contrato (R$)<input id="ctValor" class="num" style="width:100%"></label>
+    <label class="f" style="grid-column:1/-1">Objeto<input id="ctObj"></label>
+  </div>
+  <div class="bar"><h2 style="font-size:15px">Itens do contrato</h2><button class="b sec sm" onclick="addItemRow()">Adicionar item</button></div>
+  <div class="tw"><table><thead><tr><th>Código</th><th>Descrição</th><th>Un.</th><th class="n">Quantidade</th><th class="n">Valor unitário (R$)</th><th class="n">Total (R$)</th><th></th></tr></thead><tbody id="ctItens"></tbody>
+  <tfoot><tr class="tot"><td colspan="5">Soma dos itens</td><td class="n" id="ctSoma">0,00</td><td></td></tr></tfoot></table></div>
+  <div class="msg" id="ctMsg"></div>
+  <div class="ft"><button class="b sec" onclick="fechar('mdContrato')">Cancelar</button><button class="b" onclick="salvarContrato()">Salvar contrato</button></div>
+</div></div>
+
+<!-- MODAL ADITIVOS -->
+<div class="ov" id="mdAditivo"><div class="md">
+  <h3 id="mdAdTit">Aditivos</h3>
+  <div class="tw" style="margin-bottom:16px"><table id="tbAditivos"></table></div>
+  <div class="panel" style="background:var(--concrete)">
+    <h3 style="font-size:15px" id="adFormTit">Novo aditivo</h3>
+    <div class="grid">
+      <label class="f">Nº do aditivo<input id="adNum"></label>
+      <label class="f">Data<input type="date" id="adData"></label>
+      <label class="f" style="grid-column:span 2">Justificativa / descrição<input id="adDesc"></label>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Informe acréscimos (+) ou supressões (−). Para item novo, escolha "Novo item" e preencha os dados.</p>
+    <div class="tw"><table><thead><tr><th>Item</th><th>Descrição (item novo)</th><th>Un.</th><th class="n">V. unit. (R$)</th><th class="n">Δ Quantidade</th><th class="n">Δ Valor (R$)</th><th></th></tr></thead><tbody id="adLinhas"></tbody>
+    <tfoot><tr class="tot"><td colspan="5">Impacto do aditivo</td><td class="n" id="adSoma">0,00</td><td></td></tr></tfoot></table></div>
+    <div style="margin-top:8px"><button class="b sec sm" onclick="addAdRow()">Adicionar linha</button></div>
+    <div class="msg" id="adMsg"></div>
+    <div class="ft"><button class="b sec" onclick="novoAditivoForm()">Limpar</button><button class="b" onclick="salvarAditivo()">Salvar aditivo</button></div>
+  </div>
+  <div class="ft"><button class="b sec" onclick="fechar('mdAditivo')">Fechar</button></div>
+</div></div>
+
+<!-- MODAL MEDIÇÃO -->
+<div class="ov" id="mdMedicao"><div class="md">
+  <h3 id="mdMdTit">Nova medição</h3>
+  <div class="grid">
+    <label class="f">Contrato<select id="mdCt" onchange="montarLinhasMed()"></select></label>
+    <label class="f">Nº da medição<input id="mdNum"></label>
+    <label class="f">Período – início<input type="date" id="mdIni"></label>
+    <label class="f">Período – fim<input type="date" id="mdFim"></label>
+    <label class="f">Data da medição<input type="date" id="mdData"></label>
+    <label class="f" style="grid-column:1/-1">Observações<input id="mdObs"></label>
+  </div>
+  <div class="tw"><table><thead><tr><th>Código</th><th>Descrição</th><th class="n">Contratado (R$)</th><th class="n">Medido anterior (R$)</th><th class="n">Saldo (R$)</th><th class="n">Esta medição (R$)</th><th class="n">Saldo após (R$)</th></tr></thead><tbody id="mdLinhas"></tbody>
+  <tfoot><tr class="tot"><td colspan="5">Total da medição</td><td class="n" id="mdSoma">0,00</td><td></td></tr></tfoot></table></div>
+  <div class="msg" id="mdMsg"></div>
+  <div class="ft"><button class="b sec" onclick="fechar('mdMedicao')">Cancelar</button><button class="b" onclick="salvarMedicao()">Salvar medição</button></div>
+</div></div>
+
+<!-- MODAL MEDIÇÕES DO CONTRATO -->
+<div class="ov" id="mdMedCt"><div class="md">
+  <h3 id="mdMedCtTit">Medições do contrato</h3>
+  <div class="tw"><table id="tbMedCt"></table></div>
+  <div class="ft"><button class="b sec" onclick="novaMedDoCt()">Nova medição neste contrato</button><button class="b sec" onclick="fechar('mdMedCt')">Fechar</button></div>
+</div></div>
+
+<!-- MODAL SETOR DE MEDIÇÃO -->
+<div class="ov" id="mdSetor"><div class="md" style="max-width:720px">
+  <h3>Setor de medição</h3>
+  <div class="stabs" id="setorTabs">
+    <button class="on" data-s="sSalvamento">Salvamento</button>
+  </div>
+  <div class="spane on" id="sSalvamento">
+    <p style="margin:0 0 12px;color:var(--muted)">A base de dados fica neste arquivo JSON. Salve ao final de cada sessão e importe ao reabrir a ferramenta.</p>
+    <div class="grid" id="setorResumo"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="b" onclick="exportar()">Salvar JSON</button>
+      <button class="b sec" onclick="$('fImp').click()">Importar JSON</button>
+    </div>
+    <div class="msg" id="setorMsg"></div>
+  </div>
+  <div class="ft"><button class="b sec" onclick="fechar('mdSetor')">Fechar</button></div>
+</div></div>
+
+<script>
+/* ===== Estado ===== */
+let ultimoSalvamento=null, ultimoArquivo=null;
+let S = {versao:1, logo:null, contratos:[], medicoes:[]};
+let editCt=null, editMed=null, adCt=null, editAd=null;
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const $=id=>document.getElementById(id);
+const fmt=v=>(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtQ=v=>(Number(v)||0).toLocaleString('pt-BR',{maximumFractionDigits:4});
+const pct=v=>(isFinite(v)?v:0).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dt=d=>d?d.split('-').reverse().join('/'):'';
+function num(s){ if(typeof s==='number')return s; s=String(s||'').trim(); if(!s)return 0;
+  s=s.replace(/\s|R\$/g,'');
+  if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');
+  else if(/^-?\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,''); // ponto como separador de milhar (padrão pt-BR)
+  const n=parseFloat(s); return isNaN(n)?0:n; }
+const r2=v=>Math.round(v*100)/100;
+
+/* ===== Cálculos ===== */
+const ct=id=>S.contratos.find(c=>c.id===id);
+function aditItem(c,itemId){let q=0,v=0;(c.aditivos||[]).forEach(a=>a.linhas.forEach(l=>{if(l.itemId===itemId){q+=l.dQtd;v+=l.dValor;}}));return{q,v};}
+function itemCalc(c,it){const a=aditItem(c,it.id);const orig=r2(it.qtd*it.vu);return{orig,adQ:a.q,adV:a.v,qtdAtual:it.qtd+a.q,contratado:r2(orig+a.v)};}
+function medidoItem(ctId,itemId,excetoMed){let t=0;S.medicoes.forEach(m=>{if(m.contratoId!==ctId||m.id===excetoMed)return;m.linhas.forEach(l=>{if(l.itemId===itemId)t+=l.valor;});});return r2(t);}
+function medTotal(m){return r2(m.linhas.reduce((s,l)=>s+l.valor,0));}
+function ctResumo(c){let orig=0,ad=0,med=0;c.itens.forEach(it=>{const k=itemCalc(c,it);orig+=k.orig;ad+=k.adV;med+=medidoItem(c.id,it.id);});
+  const contratado=r2(orig+ad);return{orig:r2(orig),ad:r2(ad),contratado,medido:r2(med),saldo:r2(contratado-med)};}
+
+/* ===== Abas ===== */
+const TELAS={tResumo:['Resumo'],tContratos:['Medição','Contratos'],tMedicoes:['Medição','Medições'],tFluxo:['Medição','Controle de envio']};
+let telaAtual='tResumo';
+function irPara(id){telaAtual=id;document.querySelector('main').classList.toggle('full',id==='tFluxo');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id===id));
+  document.querySelectorAll('#menu [data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===id));
+  const c=TELAS[id];$('crumb').innerHTML=id==='tResumo'?'<b>Resumo</b>':`<a onclick="irPara('tResumo')">Resumo</a> › ${c[0]} › <b>${c[1]}</b>`;
+  fecharMenu();render();window.scrollTo(0,0);}
+function fecharMenu(){$('menu').classList.remove('on');$('btnMenu').setAttribute('aria-expanded','false');}
+$('btnMenu').onclick=e=>{e.stopPropagation();const on=$('menu').classList.toggle('on');$('btnMenu').setAttribute('aria-expanded',on);
+  if(on){const g=document.querySelector('#menu [data-go="'+telaAtual+'"]')?.closest('.grp');document.querySelectorAll('#menu .grp').forEach(x=>x.classList.toggle('open',x===g));}};
+document.querySelectorAll('#menu [data-grp]').forEach(b=>b.onclick=e=>{e.stopPropagation();const g=b.parentElement;const ab=!g.classList.contains('open');
+  document.querySelectorAll('#menu .grp').forEach(x=>x.classList.remove('open'));g.classList.toggle('open',ab);});
+document.querySelectorAll('#menu [data-go]').forEach(b=>b.onclick=()=>irPara(b.dataset.go));
+$('menu').onclick=e=>e.stopPropagation();
+document.addEventListener('click',fecharMenu);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')fecharMenu();});
+function abrir(id){$(id).classList.add('on');}
+function fechar(id){$(id).classList.remove('on');}
+function msg(id,txt,tipo){const e=$(id);e.className='msg'+(txt?' on '+tipo:'');e.textContent=txt||'';}
+
+/* ===== Render geral ===== */
+function render(){rContratos();fillSelects();rMedicoes();rAcomp();rFluxo();rLogo();if($('mdMedCt').classList.contains('on'))rMedCt();}
+function fillSelects(){
+  const opts=S.contratos.map(c=>`<option value="${c.id}">${esc(c.numero)} – ${esc(c.fornecedor)}</option>`).join('');
+  ['fMedCt','fAcCt'].forEach(id=>{const v=$(id).value;$(id).innerHTML='<option value="">Todos os contratos</option>'+opts;if([...$(id).options].some(o=>o.value===v))$(id).value=v;});
+}
+
+/* ===== Contratos ===== */
+function rContratos(){
+  const t=$('tbContratos');
+  if(!S.contratos.length){t.innerHTML='<tr><td class="empty">Nenhum contrato cadastrado. Use "Novo contrato" para começar.</td></tr>';return;}
+  let h='<thead><tr><th>Nº contrato</th><th>Fornecedor</th><th>Objeto</th><th class="n">Itens</th><th class="n">Valor do contrato</th><th class="n">Soma itens (original)</th><th class="n">Aditivos</th><th class="n">Valor atual</th><th></th></tr></thead><tbody>';
+  S.contratos.forEach(c=>{const r=ctResumo(c);const dif=Math.abs(r.orig-c.valor)>0.01;
+    h+=`<tr><td><b>${esc(c.numero)}</b></td><td>${esc(c.fornecedor)}<br><small style="color:var(--muted)">${esc(c.cnpj)}</small></td><td>${esc(c.objeto)}</td>
+    <td class="n">${c.itens.length}</td><td class="n">${fmt(c.valor)}</td><td class="n ${dif?'neg':''}" title="${dif?'Diverge do valor do contrato':''}">${fmt(r.orig)}</td>
+    <td class="n">${fmt(r.ad)} <span class="tag ad">${(c.aditivos||[]).length}</span></td><td class="n"><b>${fmt(r.contratado)}</b></td>
+    <td style="white-space:nowrap"><button class="b sec sm" onclick="abrirContrato('${c.id}')">Editar</button> <button class="b sec sm" onclick="abrirAditivos('${c.id}')">Aditivos</button> <button class="b dan sm" onclick="excluirContrato('${c.id}')">Excluir</button></td></tr>`;});
+  t.innerHTML=h+'</tbody>';
+}
+function abrirContrato(id){
+  editCt=id||null;const c=id?ct(id):null;
+  $('mdCtTit').textContent=c?'Editar contrato '+c.numero:'Novo contrato';
+  $('ctNum').value=c?.numero||'';$('ctForn').value=c?.fornecedor||'';$('ctCnpj').value=c?.cnpj||'';
+  $('ctData').value=c?.data||'';$('ctObj').value=c?.objeto||'';$('ctValor').value=c?fmt(c.valor):'';
+  $('ctItens').innerHTML='';(c?.itens.filter(i=>!i.origemAditivo)||[]).forEach(addItemRow);
+  if(!c)addItemRow();somaItens();msg('ctMsg');abrir('mdContrato');
+}
+function addItemRow(it){
+  const tr=document.createElement('tr');tr.dataset.id=it?.id||'';
+  tr.innerHTML=`<td><input style="width:80px" value="${esc(it?.codigo||'')}"></td><td><input style="width:100%;min-width:200px" value="${esc(it?.descricao||'')}"></td>
+  <td><input style="width:55px" value="${esc(it?.unidade||'')}"></td><td class="n"><input class="num" value="${it?fmtQ(it.qtd):''}"></td>
+  <td class="n"><input class="num" value="${it?fmt(it.vu):''}"></td><td class="n tt">0,00</td><td><button class="b dan sm" title="Remover item">×</button></td>`;
+  tr.querySelectorAll('input').forEach(i=>i.oninput=somaItens);
+  tr.querySelector('button').onclick=()=>{const iid=tr.dataset.id;
+    if(iid&&editCt&&S.medicoes.some(m=>m.contratoId===editCt&&m.linhas.some(l=>l.itemId===iid&&l.valor))){msg('ctMsg','Item com medição lançada não pode ser removido.','warn');return;}
+    if(iid&&editCt&&(ct(editCt).aditivos||[]).some(a=>a.linhas.some(l=>l.itemId===iid))){msg('ctMsg','Item com aditivo vinculado não pode ser removido.','warn');return;}
+    tr.remove();somaItens();};
+  $('ctItens').appendChild(tr);somaItens();
+}
+function somaItens(){let s=0;$('ctItens').querySelectorAll('tr').forEach(tr=>{const i=tr.querySelectorAll('input');const t=r2(num(i[3].value)*num(i[4].value));tr.querySelector('.tt').textContent=fmt(t);s+=t;});
+  $('ctSoma').textContent=fmt(s);const v=num($('ctValor').value);
+  if(v&&Math.abs(r2(s)-v)>0.01)msg('ctMsg',`Soma dos itens (R$ ${fmt(s)}) diferente do valor do contrato (R$ ${fmt(v)}).`,'warn');else if($('ctMsg').classList.contains('warn')&&!$('ctMsg').textContent.startsWith('Item'))msg('ctMsg');}
+$('ctValor').addEventListener('input',somaItens);
+function salvarContrato(){
+  const numero=$('ctNum').value.trim(),forn=$('ctForn').value.trim();
+  if(!numero||!forn){msg('ctMsg','Informe nº do contrato e fornecedor.','warn');return;}
+  if(S.contratos.some(c=>c.numero===numero&&c.id!==editCt)){msg('ctMsg','Já existe contrato com esse número.','warn');return;}
+  const itens=[];let erro='';
+  $('ctItens').querySelectorAll('tr').forEach(tr=>{const i=tr.querySelectorAll('input');const d=i[1].value.trim();if(!d&&!i[0].value.trim())return;
+    if(!d)erro='Todos os itens precisam de descrição.';
+    itens.push({id:tr.dataset.id||uid(),codigo:i[0].value.trim(),descricao:d,unidade:i[2].value.trim(),qtd:num(i[3].value),vu:num(i[4].value)});});
+  if(erro){msg('ctMsg',erro,'warn');return;}
+  if(!itens.length){msg('ctMsg','Cadastre ao menos um item.','warn');return;}
+  const base={numero,fornecedor:forn,cnpj:$('ctCnpj').value.trim(),data:$('ctData').value,objeto:$('ctObj').value.trim(),valor:num($('ctValor').value)};
+  if(editCt){const c=ct(editCt);const adItens=c.itens.filter(i=>i.origemAditivo);Object.assign(c,base,{itens:[...itens,...adItens]});}
+  else S.contratos.push({id:uid(),...base,itens,aditivos:[]});
+  fechar('mdContrato');render();
+}
+function excluirContrato(id){const c=ct(id);
+  if(S.medicoes.some(m=>m.contratoId===id)){alert('Contrato possui medições lançadas. Exclua as medições antes.');return;}
+  if(confirm(`Excluir o contrato ${c.numero}?`)){S.contratos=S.contratos.filter(x=>x.id!==id);render();}}
+
+/* ===== Aditivos ===== */
+function abrirAditivos(id){adCt=id;const c=ct(id);$('mdAdTit').textContent=`Aditivos – contrato ${c.numero} (${c.fornecedor})`;rAditivos();novoAditivoForm();abrir('mdAditivo');}
+function rAditivos(){const c=ct(adCt);const t=$('tbAditivos');
+  if(!(c.aditivos||[]).length){t.innerHTML='<tr><td class="empty">Nenhum aditivo cadastrado.</td></tr>';return;}
+  let h='<thead><tr><th>Nº</th><th>Data</th><th>Descrição</th><th class="n">Linhas</th><th class="n">Impacto (R$)</th><th></th></tr></thead><tbody>';
+  c.aditivos.forEach(a=>{const v=r2(a.linhas.reduce((s,l)=>s+l.dValor,0));
+    h+=`<tr><td>${esc(a.numero)}</td><td>${dt(a.data)}</td><td>${esc(a.descricao)}</td><td class="n">${a.linhas.length}</td><td class="n ${v<0?'neg':''}">${fmt(v)}</td>
+    <td style="white-space:nowrap"><button class="b sec sm" onclick="editarAditivo('${a.id}')">Editar</button> <button class="b dan sm" onclick="excluirAditivo('${a.id}')">Excluir</button></td></tr>`;});
+  t.innerHTML=h+'</tbody>';}
+function novoAditivoForm(){editAd=null;$('adFormTit').textContent='Novo aditivo';$('adNum').value='';$('adData').value='';$('adDesc').value='';$('adLinhas').innerHTML='';addAdRow();msg('adMsg');}
+function editarAditivo(aid){const a=ct(adCt).aditivos.find(x=>x.id===aid);editAd=aid;$('adFormTit').textContent='Editar aditivo '+a.numero;
+  $('adNum').value=a.numero;$('adData').value=a.data;$('adDesc').value=a.descricao;$('adLinhas').innerHTML='';a.linhas.forEach(addAdRow);msg('adMsg');}
+function addAdRow(l){const c=ct(adCt);const tr=document.createElement('tr');
+  const opts=c.itens.map(i=>`<option value="${i.id}" ${l?.itemId===i.id?'selected':''}>${esc(i.codigo)} ${esc(i.descricao)}${i.origemAditivo?' (aditivo)':''}</option>`).join('');
+  tr.innerHTML=`<td><select style="max-width:240px"><option value="">— selecione —</option><option value="__novo">Novo item</option>${opts}</select></td>
+  <td><input style="width:100%;min-width:160px" placeholder="Código – descrição" disabled></td><td><input style="width:55px" disabled></td>
+  <td class="n"><input class="num" disabled></td><td class="n"><input class="num" value="${l?fmtQ(l.dQtd):''}"></td><td class="n"><input class="num" value="${l?fmt(l.dValor):''}"></td>
+  <td><button class="b dan sm">×</button></td>`;
+  const sel=tr.querySelector('select'),inp=tr.querySelectorAll('input');
+  const sync=()=>{const novo=sel.value==='__novo';[0,1,2].forEach(k=>inp[k].disabled=!novo);
+    if(!novo&&sel.value){const it=c.itens.find(i=>i.id===sel.value);inp[0].value=it.descricao;inp[1].value=it.unidade;inp[2].value=fmt(it.vu);}
+    else if(!novo){inp[0].value='';inp[1].value='';inp[2].value='';}};
+  sel.onchange=()=>{if(sel.value==='__novo'){inp[0].value='';inp[1].value='';inp[2].value='';}sync();};
+  inp[3].oninput=()=>{const vu=num(inp[2].value);if(vu)inp[4].value=fmt(r2(num(inp[3].value)*vu));somaAd();};
+  inp[2].oninput=()=>{const vu=num(inp[2].value);if(vu&&inp[3].value)inp[4].value=fmt(r2(num(inp[3].value)*vu));somaAd();};
+  inp[4].oninput=somaAd;tr.querySelector('button').onclick=()=>{tr.remove();somaAd();};
+  sync();$('adLinhas').appendChild(tr);somaAd();}
+function somaAd(){let s=0;$('adLinhas').querySelectorAll('tr').forEach(tr=>s+=num(tr.querySelectorAll('input')[4].value));$('adSoma').textContent=fmt(s);}
+function salvarAditivo(){const c=ct(adCt);const numero=$('adNum').value.trim();
+  if(!numero){msg('adMsg','Informe o nº do aditivo.','warn');return;}
+  const linhas=[],novos=[];let erro='';
+  $('adLinhas').querySelectorAll('tr').forEach(tr=>{const sel=tr.querySelector('select').value,inp=tr.querySelectorAll('input');if(!sel)return;
+    const dQtd=num(inp[3].value),dValor=r2(num(inp[4].value));
+    if(sel==='__novo'){const txt=inp[0].value.trim();if(!txt){erro='Item novo precisa de descrição.';return;}
+      const p=txt.split(' – ');const it={id:uid(),codigo:p.length>1?p[0].trim():'',descricao:p.length>1?p.slice(1).join(' – ').trim():txt,unidade:inp[1].value.trim(),qtd:0,vu:num(inp[2].value),origemAditivo:numero};
+      novos.push(it);linhas.push({itemId:it.id,dQtd,dValor});}
+    else linhas.push({itemId:sel,dQtd,dValor});});
+  if(erro){msg('adMsg',erro,'warn');return;}
+  if(!linhas.length){msg('adMsg','Inclua ao menos uma linha.','warn');return;}
+  // valida supressão abaixo do já medido
+  const tmp={...c,itens:[...c.itens,...novos],aditivos:(c.aditivos||[]).filter(a=>a.id!==editAd).concat([{id:'tmp',linhas}])};
+  const neg=tmp.itens.filter(it=>itemCalc(tmp,it).contratado<medidoItem(c.id,it.id)-0.01);
+  if(neg.length&&!confirm(`Após este aditivo, ${neg.length} item(ns) ficarão com valor contratado menor que o já medido. Salvar mesmo assim?`))return;
+  c.itens.push(...novos);c.aditivos=c.aditivos||[];
+  if(editAd){const a=c.aditivos.find(x=>x.id===editAd);Object.assign(a,{numero,data:$('adData').value,descricao:$('adDesc').value.trim(),linhas});}
+  else c.aditivos.push({id:uid(),numero,data:$('adData').value,descricao:$('adDesc').value.trim(),linhas});
+  limparItensOrfaos(c);rAditivos();novoAditivoForm();msg('adMsg','Aditivo salvo.','ok');render();}
+function excluirAditivo(aid){const c=ct(adCt);const a=c.aditivos.find(x=>x.id===aid);
+  const afetados=c.itens.filter(i=>i.origemAditivo&&a.linhas.some(l=>l.itemId===i.id)&&medidoItem(c.id,i.id)>0);
+  if(afetados.length){alert('Este aditivo criou item(ns) que já possuem medição. Exclua as medições antes.');return;}
+  if(!confirm(`Excluir o aditivo ${a.numero}?`))return;
+  c.aditivos=c.aditivos.filter(x=>x.id!==aid);limparItensOrfaos(c);rAditivos();render();}
+function limparItensOrfaos(c){c.itens=c.itens.filter(i=>!i.origemAditivo||c.aditivos.some(a=>a.linhas.some(l=>l.itemId===i.id)));}
+
+/* ===== Medições ===== */
+let expandidas=new Set();
+function ordemMed(cid){return S.medicoes.filter(m=>m.contratoId===cid).sort((a,b)=>String(a.numero).localeCompare(String(b.numero),'pt-BR',{numeric:true}));}
+function togMed(id){expandidas.has(id)?expandidas.delete(id):expandidas.add(id);rMedicoes();if($('mdMedCt').classList.contains('on'))rMedCt();}
+function detalheMed(m,cols){const c=ct(m.contratoId);const ord=ordemMed(c.id);const pos=ord.findIndex(x=>x.id===m.id);const ant=ord.slice(0,pos);
+  let h=`<tr class="det"><td colspan="${cols}"><table><thead><tr><th>Código</th><th>Descrição</th><th class="n">Contratado</th><th class="n">Acum. anterior</th><th class="n">Esta medição</th><th class="n">Acum. atual</th><th class="n">Saldo</th><th class="n">% acum.</th></tr></thead><tbody>`;
+  const T={ct:0,an:0,es:0};
+  c.itens.forEach(it=>{const k=itemCalc(c,it);const an=r2(ant.reduce((s,x)=>s+(x.linhas.find(l=>l.itemId===it.id)?.valor||0),0));const es=m.linhas.find(l=>l.itemId===it.id)?.valor||0;
+    if(!es&&!an)return;T.ct+=k.contratado;T.an+=an;T.es+=es;const ac=an+es;const pp=k.contratado?ac/k.contratado*100:0;
+    h+=`<tr${es?'':' style="color:var(--muted)"'}><td>${esc(it.codigo)}</td><td>${esc(it.descricao)}</td><td class="n">${fmt(k.contratado)}</td><td class="n">${fmt(an)}</td><td class="n"><b>${fmt(es)}</b></td><td class="n">${fmt(ac)}</td><td class="n ${k.contratado-ac<-0.009?'neg':''}">${fmt(k.contratado-ac)}</td><td class="n">${pct(pp)}</td></tr>`;});
+  const ac=T.an+T.es;
+  h+=`<tr class="tot"><td colspan="2">Total (itens com medição)</td><td class="n">${fmt(T.ct)}</td><td class="n">${fmt(T.an)}</td><td class="n">${fmt(T.es)}</td><td class="n">${fmt(ac)}</td><td class="n">${fmt(T.ct-ac)}</td><td class="n">${pct(T.ct?ac/T.ct*100:0)}</td></tr></tbody></table>
+  ${m.obs?`<p class="auto" style="margin:8px 0 0">Obs.: ${esc(m.obs)}</p>`:''}</td></tr>`;return h;}
+function btnXp(id){const on=expandidas.has(id);return `<button class="b sec sm" onclick="togMed('${id}')" aria-expanded="${on}"><span class="xp ${on?'on':''}">›</span> ${on?'Recolher':'Expandir'}</button>`;}
+function rMedicoes(){const f=$('fMedCt').value;const t=$('tbMedicoes');
+  const lista=S.medicoes.filter(m=>!f||m.contratoId===f).sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  if(!lista.length){t.innerHTML=`<tr><td class="empty">${S.contratos.length?'Nenhuma medição lançada. Use "Nova medição".':'Cadastre um contrato antes de lançar medições.'}</td></tr>`;return;}
+  let h='<thead><tr><th>Contrato</th><th>Fornecedor</th><th>Nº medição</th><th>Período</th><th>Data</th><th>Obs.</th><th class="n">Valor (R$)</th><th></th></tr></thead><tbody>';let tot=0;
+  lista.forEach(m=>{const c=ct(m.contratoId);const v=medTotal(m);tot+=v;
+    h+=`<tr><td>${esc(c?.numero)}</td><td>${esc(c?.fornecedor)}</td><td>${esc(m.numero)}</td><td>${dt(m.ini)} a ${dt(m.fim)}</td><td>${dt(m.data)}</td><td>${esc(m.obs)}</td><td class="n">${fmt(v)}</td>
+    <td style="white-space:nowrap">${btnXp(m.id)} <button class="b sec sm" onclick="abrirMedicao('${m.id}')">Editar</button> <button class="b dan sm" onclick="excluirMedicao('${m.id}')">Excluir</button></td></tr>`;
+    if(expandidas.has(m.id))h+=detalheMed(m,8);});
+  t.innerHTML=h+`<tr class="tot"><td colspan="6">Total</td><td class="n">${fmt(tot)}</td><td></td></tr></tbody>`;}
+/* medições do contrato */
+let medCtId=null;
+function abrirMedCt(cid){medCtId=cid;rMedCt();abrir('mdMedCt');}
+function rMedCt(){const c=ct(medCtId);if(!c){fechar('mdMedCt');return;}const r=ctResumo(c);
+  $('mdMedCtTit').textContent=`Medições – contrato ${c.numero} (${c.fornecedor})`;
+  const lista=ordemMed(c.id);
+  if(!lista.length){$('tbMedCt').innerHTML='<tr><td class="empty">Nenhuma medição lançada para este contrato.</td></tr>';return;}
+  let h='<thead><tr><th>Nº</th><th>Período</th><th>Data</th><th class="n">Valor (R$)</th><th class="n">Acumulado (R$)</th><th class="n">% acum.</th><th></th></tr></thead><tbody>';let ac=0;
+  lista.forEach(m=>{const v=medTotal(m);ac+=v;
+    h+=`<tr><td><b>${esc(m.numero)}</b></td><td>${dt(m.ini)} a ${dt(m.fim)}</td><td>${dt(m.data)}</td><td class="n">${fmt(v)}</td><td class="n">${fmt(ac)}</td><td class="n">${pct(r.contratado?ac/r.contratado*100:0)}</td>
+    <td style="white-space:nowrap">${btnXp(m.id)} <button class="b sec sm" onclick="fechar('mdMedCt');abrirMedicao('${m.id}')">Editar</button></td></tr>`;
+    if(expandidas.has(m.id))h+=detalheMed(m,7);});
+  $('tbMedCt').innerHTML=h+`<tr class="tot"><td colspan="3">Contratado atual R$ ${fmt(r.contratado)} | Saldo R$ ${fmt(r.saldo)}</td><td class="n">${fmt(r.medido)}</td><td></td><td></td><td></td></tr></tbody>`;}
+function novaMedDoCt(){fechar('mdMedCt');$('fMedCt').value=medCtId;abrirMedicao();}
+/* controle de envio */
+const ASSIN=[['assCustos','Custos'],['assEng','Engenharia'],['assProd','Produção'],['assAdm','ADM Financeiro'],['assGer','Gerência de contrato'],['assForn','Fornecedor']];
+const CAMPOS_FLUXO=[['elaborada','Elaborada'],['envioAss','Envio p/ assinatura'],...ASSIN.map(([k,n])=>[k,'Assinatura '+n]),['assunto','Assunto do e-mail']];
+function pendFluxo(m){return CAMPOS_FLUXO.filter(([k])=>!String(m[k]||'').trim()).map(([,n])=>n);}
+function sinal(m){const p=pendFluxo(m);return p.length?`<span class="sig no" title="Pendente: ${esc(p.join(', '))}"><i></i>Incompleto</span>`:'<span class="sig ok" title="Todos os campos preenchidos"><i></i>Completo</span>';}
+function migrarFluxo(){S.medicoes.forEach(m=>{if(m.chegada!==undefined){if(!m.elaborada)m.elaborada=m.chegada;delete m.chegada;}});}
+function rFluxo(){migrarFluxo();const sel=$('fFluxForn');const v=sel.value;const forns=[...new Set(S.contratos.map(c=>c.fornecedor))].sort();
+  sel.innerHTML='<option value="">Todos os fornecedores</option>'+forns.map(f=>`<option ${f===v?'selected':''}>${esc(f)}</option>`).join('');
+  const lista=S.medicoes.filter(m=>!v||ct(m.contratoId)?.fornecedor===v).sort((a,b)=>{const ca=ct(a.contratoId),cb=ct(b.contratoId);
+    return (ca.fornecedor+ca.numero).localeCompare(cb.fornecedor+cb.numero)||String(a.numero).localeCompare(String(b.numero),'pt-BR',{numeric:true});});
+  const t=$('tbFluxo');
+  if(!lista.length){t.innerHTML='<tr><td class="empty">Nenhuma medição lançada.</td></tr>';return;}
+  const di=(m,k)=>`<td><input type="date" value="${m[k]||''}" onchange="setFlux('${m.id}','${k}',this.value)"></td>`;
+  let h=`<thead><tr><th colspan="7"></th><th class="g" colspan="${ASSIN.length}">Assinaturas dos setores</th><th colspan="2"></th></tr>
+  <tr><th>Fornecedor</th><th>Contrato</th><th>Nº medição</th><th>Período da medição</th><th class="n">Valor (R$)</th><th>Elaborada</th><th>Envio p/ assinatura</th>${ASSIN.map(([,n])=>`<th>${n}</th>`).join('')}<th>Assunto do e-mail da medição</th><th>Status</th></tr></thead><tbody>`;
+  lista.forEach(m=>{const c=ct(m.contratoId);
+    h+=`<tr data-id="${m.id}"><td>${esc(c.fornecedor)}</td><td>${esc(c.numero)}</td><td><b>${esc(m.numero)}</b></td><td style="white-space:nowrap">${m.ini||m.fim?dt(m.ini)+' a '+dt(m.fim):'—'}</td><td class="n">${fmt(medTotal(m))}</td>
+    ${di(m,'elaborada')}${di(m,'envioAss')}
+    ${ASSIN.map(([k])=>di(m,k)).join('')}
+    <td><input type="text" value="${esc(m.assunto||'')}" placeholder="Assunto do e-mail" onchange="setFlux('${m.id}','assunto',this.value.trim())"></td>
+    <td class="st">${sinal(m)}</td></tr>`;});
+  t.innerHTML=h+'</tbody>';}
+function setFlux(id,campo,val){const m=S.medicoes.find(x=>x.id===id);m[campo]=val||'';
+  if(campo==='envioAss'&&val&&m.elaborada&&val<m.elaborada)alert('Atenção: data de envio para assinatura anterior à data de elaboração.');
+  if(ASSIN.some(([k])=>k===campo)&&val&&m.envioAss&&val<m.envioAss)alert('Atenção: data de assinatura anterior ao envio para assinatura.');
+  const tr=document.querySelector(`#tbFluxo tr[data-id="${id}"] .st`);if(tr)tr.innerHTML=sinal(m);}
+function abrirMedicao(id){
+  if(!S.contratos.length){alert('Cadastre um contrato antes.');return;}
+  editMed=id||null;const m=id?S.medicoes.find(x=>x.id===id):null;
+  $('mdMdTit').textContent=m?'Editar medição '+m.numero:'Nova medição';
+  $('mdCt').innerHTML=S.contratos.map(c=>`<option value="${c.id}">${esc(c.numero)} – ${esc(c.fornecedor)}</option>`).join('');
+  $('mdCt').value=m?.contratoId||$('fMedCt').value||S.contratos[0].id;$('mdCt').disabled=!!m;
+  $('mdNum').value=m?.numero||proxNumMed($('mdCt').value);$('mdIni').value=m?.ini||'';$('mdFim').value=m?.fim||'';$('mdData').value=m?.data||'';$('mdObs').value=m?.obs||'';
+  montarLinhasMed(m);msg('mdMsg');abrir('mdMedicao');}
+function proxNumMed(cid){const n=S.medicoes.filter(m=>m.contratoId===cid).length+1;return String(n).padStart(2,'0');}
+function montarLinhasMed(m){const cid=$('mdCt').value;const c=ct(cid);if(!m&&!editMed)$('mdNum').value=proxNumMed(cid);
+  $('mdLinhas').innerHTML=c.itens.map(it=>{const k=itemCalc(c,it);const ant=medidoItem(cid,it.id,editMed);const v=m?.linhas.find(l=>l.itemId===it.id)?.valor;
+    return `<tr data-id="${it.id}" data-saldo="${r2(k.contratado-ant)}"><td>${esc(it.codigo)}</td><td>${esc(it.descricao)} ${it.origemAditivo?'<span class="tag ad">aditivo</span>':''}</td>
+    <td class="n">${fmt(k.contratado)}</td><td class="n">${fmt(ant)}</td><td class="n">${fmt(k.contratado-ant)}</td>
+    <td class="n"><input class="num" value="${v?fmt(v):''}" oninput="somaMed()"></td><td class="n sa">${fmt(k.contratado-ant)}</td></tr>`;}).join('');
+  somaMed();}
+function somaMed(){let s=0,exc=0;$('mdLinhas').querySelectorAll('tr').forEach(tr=>{const v=num(tr.querySelector('input').value);s+=v;const sa=r2(+tr.dataset.saldo-v);
+  const td=tr.querySelector('.sa');td.textContent=fmt(sa);td.classList.toggle('neg',sa<-0.009);if(sa<-0.009)exc++;});
+  $('mdSoma').textContent=fmt(s);msg('mdMsg',exc?`${exc} item(ns) ultrapassam o saldo contratado.`:'','warn');}
+function salvarMedicao(){const cid=$('mdCt').value;const numero=$('mdNum').value.trim();
+  if(!numero){msg('mdMsg','Informe o nº da medição.','warn');return;}
+  if(S.medicoes.some(m=>m.contratoId===cid&&m.numero===numero&&m.id!==editMed)){msg('mdMsg','Já existe medição com esse número neste contrato.','warn');return;}
+  const linhas=[];let exc=0;$('mdLinhas').querySelectorAll('tr').forEach(tr=>{const v=r2(num(tr.querySelector('input').value));if(v){linhas.push({itemId:tr.dataset.id,valor:v});if(v>+tr.dataset.saldo+0.009)exc++;}});
+  if(!linhas.length){msg('mdMsg','Informe o valor medido em ao menos um item.','warn');return;}
+  if(exc&&!confirm(`${exc} item(ns) ultrapassam o saldo do contrato. Salvar mesmo assim?`))return;
+  const base={contratoId:cid,numero,ini:$('mdIni').value,fim:$('mdFim').value,data:$('mdData').value,obs:$('mdObs').value.trim(),linhas};
+  if(editMed)Object.assign(S.medicoes.find(m=>m.id===editMed),base);else S.medicoes.push({id:uid(),criadoEm:new Date().toISOString().slice(0,10),...base});
+  fechar('mdMedicao');render();}
+function excluirMedicao(id){const m=S.medicoes.find(x=>x.id===id);if(confirm(`Excluir a medição ${m.numero}?`)){S.medicoes=S.medicoes.filter(x=>x.id!==id);expandidas.delete(id);render();}}
+
+/* ===== Acompanhamento ===== */
+function rAcomp(){const f=$('fAcCt').value;
+  if(!S.contratos.length){$('acHero').innerHTML='<div class="panel empty">Cadastre contratos e medições para ver o acompanhamento.</div>';$('tbAcomp').innerHTML='';$('acChart').innerHTML='';$('acListaTit').textContent='';return;}
+  let linhas=[];
+  if(!f){linhas=S.contratos.map(c=>{const r=ctResumo(c);return{id:c.id,lb:c.numero,sub:c.fornecedor,orig:r.orig,ad:r.ad,contratado:r.contratado,medido:r.medido,saldo:r.saldo};});$('acListaTit').textContent='Por contrato';}
+  else{const c=ct(f);linhas=c.itens.map(it=>{const k=itemCalc(c,it);const med=medidoItem(c.id,it.id);return{lb:(it.codigo?it.codigo+' ':'')+it.descricao,sub:it.origemAditivo?'Aditivo '+it.origemAditivo:'',orig:k.orig,ad:k.adV,contratado:k.contratado,medido:med,saldo:r2(k.contratado-med)};});
+    $('acListaTit').textContent=`Por item – contrato ${c.numero} (${c.fornecedor})`;}
+  const T=linhas.reduce((a,l)=>({orig:a.orig+l.orig,ad:a.ad+l.ad,contratado:a.contratado+l.contratado,medido:a.medido+l.medido,saldo:a.saldo+l.saldo}),{orig:0,ad:0,contratado:0,medido:0,saldo:0});
+  const p=T.contratado?T.medido/T.contratado*100:0;
+  const wc=Math.min(p,100),wx=Math.max(0,p-100);
+  $('acHero').innerHTML=`<div class="hero"><div class="top"><div class="pct">${pct(p)}<small>consumido</small></div><div style="color:var(--muted)">${f?'Contrato '+esc(ct(f).numero):S.contratos.length+' contrato(s)'}</div></div>
+  <div class="track" role="img" aria-label="Consumido ${pct(p)}"><div class="c" style="width:${wc}%"></div><div class="s" style="width:${Math.max(0,100-wc)}%"></div>${wx?`<div class="x" style="width:${Math.min(wx,30)}%"></div>`:''}</div>
+  <div class="legend"><span>Contratado atual<b>R$ ${fmt(T.contratado)}</b></span><span><i style="background:var(--consumo)"></i>Consumido<b>R$ ${fmt(T.medido)}</b></span>
+  <span><i style="background:var(--saldo)"></i>Saldo a consumir<b class="${T.saldo<0?'neg':''}">R$ ${fmt(T.saldo)}</b></span><span>Aditivos<b>R$ ${fmt(T.ad)}</b></span></div></div>`;
+  let h=`<thead><tr><th>${f?'Item':'Contrato'}</th>${f?'':'<th></th>'}<th class="n">Original</th><th class="n">Aditivos</th><th class="n">Contratado atual</th><th class="n">Consumido</th><th class="n">Saldo</th><th class="n">% exec.</th></tr></thead><tbody>`;
+  linhas.forEach(l=>{const pp=l.contratado?l.medido/l.contratado*100:0;
+    h+=`<tr><td>${esc(l.lb)}${l.sub?`<br><small style="color:var(--muted)">${esc(l.sub)}</small>`:''}</td>${f?'':`<td><button class="b sec sm" onclick="abrirMedCt('${l.id}')">Medições <span class="tag">${S.medicoes.filter(m=>m.contratoId===l.id).length}</span></button></td>`}<td class="n">${fmt(l.orig)}</td><td class="n">${fmt(l.ad)}</td><td class="n">${fmt(l.contratado)}</td><td class="n">${fmt(l.medido)}</td><td class="n ${l.saldo<-0.009?'neg':''}">${fmt(l.saldo)}</td><td class="n ${pp>100.01?'neg':''}">${pct(pp)}</td></tr>`;});
+  $('tbAcomp').innerHTML=h+`<tr class="tot"><td>Total</td>${f?'':'<td></td>'}<td class="n">${fmt(T.orig)}</td><td class="n">${fmt(T.ad)}</td><td class="n">${fmt(T.contratado)}</td><td class="n">${fmt(T.medido)}</td><td class="n">${fmt(T.saldo)}</td><td class="n">${pct(p)}</td></tr></tbody>`;
+  const max=Math.max(...linhas.map(l=>Math.max(l.contratado,l.medido)),1);
+  let g=`<h3 style="margin:0 0 4px;font-size:15px">${f?'Consumo por item':'Consumo por contrato'}</h3><p class="sc">Barra proporcional ao maior valor contratado (R$ ${fmt(max)}). <i style="display:inline-block;width:9px;height:9px;background:var(--consumo)"></i> consumido <i style="display:inline-block;width:9px;height:9px;background:var(--saldo);margin-left:8px"></i> saldo <i style="display:inline-block;width:9px;height:9px;background:var(--alerta);margin-left:8px"></i> excedente</p>`;
+  linhas.forEach(l=>{const c=Math.min(l.medido,l.contratado),s=Math.max(0,l.contratado-l.medido),x=Math.max(0,l.medido-l.contratado);const pp=l.contratado?l.medido/l.contratado*100:0;
+    g+=`<div class="row" title="Contratado R$ ${fmt(l.contratado)} | Consumido R$ ${fmt(l.medido)} | Saldo R$ ${fmt(l.saldo)}"><div class="lb">${esc(l.lb)}</div>
+    <div class="tr"><div style="width:${c/max*100}%;background:var(--consumo)"></div><div style="width:${s/max*100}%;background:var(--saldo)"></div><div style="width:${x/max*100}%;background:var(--alerta)"></div></div><div class="pv">${pct(pp)}</div></div>`;});
+  $('acChart').innerHTML=g;}
+
+/* ===== Logo / JSON ===== */
+function rLogo(){$('logoBox').innerHTML=S.logo?`<img src="${S.logo}" alt="Logo">`:'Carregar logo';}
+$('logoBox').onclick=()=>$('fLogo').click();
+$('fLogo').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{S.logo=r.result;rLogo();};r.readAsDataURL(f);e.target.value='';};
+function exportar(){const d=new Date();const nome=`controle_medicao_${d.toISOString().slice(0,10)}.json`;
+  const b=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nome;a.click();URL.revokeObjectURL(a.href);
+  ultimoSalvamento=new Date();ultimoArquivo=nome;rSetor();msg('setorMsg','Base salva: '+nome,'ok');}
+$('fImp').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.contratos)||!Array.isArray(d.medicoes))throw 0;
+    if((S.contratos.length||S.medicoes.length)&&!confirm('Substituir os dados atuais pelos do arquivo?'))return;
+    S={versao:1,logo:d.logo||null,contratos:d.contratos,medicoes:d.medicoes};S.contratos.forEach(c=>c.aditivos=c.aditivos||[]);S.medicoes.forEach(m=>delete m.evidencia);ultimoArquivo=f.name;render();rSetor();msg('setorMsg','Base importada: '+f.name,'ok');}
+    catch{msg('setorMsg','Arquivo inválido: o JSON precisa conter "contratos" e "medicoes".','warn');}};r.readAsText(f);e.target.value='';};
+window.addEventListener('beforeunload',e=>{if(S.contratos.length){e.preventDefault();e.returnValue='';}});
+/* ===== Setor de medição ===== */
+function abrirSetor(){rSetor();msg('setorMsg');abrir('mdSetor');}
+document.querySelectorAll('#setorTabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#setorTabs button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('#mdSetor .spane').forEach(p=>p.classList.toggle('on',p.id===b.dataset.s));});
+function rSetor(){const nAd=S.contratos.reduce((s,c)=>s+(c.aditivos||[]).length,0);
+  const hora=ultimoSalvamento?ultimoSalvamento.toLocaleString('pt-BR'):'Não salvo nesta sessão';
+  $('setorResumo').innerHTML=`<div class="kv">Contratos<b>${S.contratos.length}</b></div><div class="kv">Aditivos<b>${nAd}</b></div>
+  <div class="kv">Medições<b>${S.medicoes.length}</b></div><div class="kv">Último salvamento<b style="font-size:13px">${hora}</b></div>
+  <div class="kv" style="grid-column:1/-1">Arquivo em uso<b style="font-size:13px">${esc(ultimoArquivo||'Nenhum')}</b></div>`;}
+irPara('tResumo');
+</script>
+</body>
+</html>
