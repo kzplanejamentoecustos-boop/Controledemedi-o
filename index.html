@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Controle de Medição – Rev09</title>
+<title>Controle de Medição – Rev11</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -64,6 +64,12 @@ tr.det th{font-size:12px}
 .xp{display:inline-block;width:12px;transition:transform .15s}.xp.on{transform:rotate(90deg)}
 td input[type=date]{padding:4px 6px;font-size:12px}
 .auto{color:var(--muted);font-size:11px}
+.sh{margin:18px 0 8px;font-size:14px;color:var(--navy);border-top:1px solid var(--line);padding-top:14px}
+.nvst{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.nvst i{width:10px;height:10px;border-radius:50%;background:#B0B8C1}
+.nvst.ok i{background:#1E9E5A}.nvst.er i{background:var(--alerta)}
+button.b:disabled{opacity:.45;cursor:not-allowed}
+#tbNuvem tr.atual td{background:#FFF7E6}
 .sig{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;white-space:nowrap}
 .sig i{width:12px;height:12px;border-radius:50%;display:inline-block}
 .sig.ok{color:var(--saldo)}.sig.ok i{background:#1E9E5A}
@@ -246,10 +252,20 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mu
     <button class="on" data-s="sSalvamento">Salvamento</button>
   </div>
   <div class="spane on" id="sSalvamento">
-    <p style="margin:0 0 12px;color:var(--muted)">A base de dados fica neste arquivo JSON. Salve ao final de cada sessão e importe ao reabrir a ferramenta.</p>
     <div class="grid" id="setorResumo"></div>
+    <h4 class="sh">Nuvem (Firebase)</h4>
+    <div class="nvst" id="nvStatus"><i></i><span>Conectando…</span></div>
+    <label class="f" style="margin:10px 0">Descrição da base (usada ao salvar como nova)<input id="nvDesc" placeholder="Ex.: Controle de medição – TECON Fase 3"></label>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="b" onclick="exportar()">Salvar JSON</button>
+      <button class="b" id="btnNvNovo" onclick="nvSalvarNovo()" disabled>Salvar na nuvem</button>
+      <button class="b" id="btnNvExist" onclick="nvSalvarExistente()" disabled>Salvar na base existente</button>
+      <button class="b sec" id="btnNvList" onclick="nvListar()" disabled>Atualizar lista</button>
+    </div>
+    <div class="msg" id="nvMsg"></div>
+    <div class="tw" style="margin-top:12px"><table id="tbNuvem"></table></div>
+    <h4 class="sh">Arquivo local (JSON)</h4>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="b sec" onclick="exportar()">Salvar JSON</button>
       <button class="b sec" onclick="$('fImp').click()">Importar JSON</button>
     </div>
     <div class="msg" id="setorMsg"></div>
@@ -553,7 +569,7 @@ $('fImp').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileRe
     catch{msg('setorMsg','Arquivo inválido: o JSON precisa conter "contratos" e "medicoes".','warn');}};r.readAsText(f);e.target.value='';};
 window.addEventListener('beforeunload',e=>{if(S.contratos.length){e.preventDefault();e.returnValue='';}});
 /* ===== Setor de medição ===== */
-function abrirSetor(){rSetor();msg('setorMsg');abrir('mdSetor');}
+function abrirSetor(){rSetor();msg('setorMsg');abrir('mdSetor');if(window.nuvem)nvListar();}
 document.querySelectorAll('#setorTabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#setorTabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.querySelectorAll('#mdSetor .spane').forEach(p=>p.classList.toggle('on',p.id===b.dataset.s));});
@@ -561,8 +577,84 @@ function rSetor(){const nAd=S.contratos.reduce((s,c)=>s+(c.aditivos||[]).length,
   const hora=ultimoSalvamento?ultimoSalvamento.toLocaleString('pt-BR'):'Não salvo nesta sessão';
   $('setorResumo').innerHTML=`<div class="kv">Contratos<b>${S.contratos.length}</b></div><div class="kv">Aditivos<b>${nAd}</b></div>
   <div class="kv">Medições<b>${S.medicoes.length}</b></div><div class="kv">Último salvamento<b style="font-size:13px">${hora}</b></div>
-  <div class="kv" style="grid-column:1/-1">Arquivo em uso<b style="font-size:13px">${esc(ultimoArquivo||'Nenhum')}</b></div>`;}
-irPara('tResumo');
+  <div class="kv" style="grid-column:span 2">Arquivo JSON em uso<b style="font-size:13px">${esc(ultimoArquivo||'Nenhum')}</b></div><div class="kv" style="grid-column:span 2">Base na nuvem em uso<b style="font-size:13px">${esc(NV.nome||'Nenhuma')}</b></div>`;}
+/* ===== Nuvem (Firebase / Firestore) ===== */
+const NV={id:null,nome:'',versao:null}; // base da nuvem carregada/salva nesta sessão
+function nvStatus(t,tipo){const e=$('nvStatus');e.className='nvst '+(tipo||'');e.querySelector('span').textContent=t;}
+function nvBtns(){const ok=!!window.nuvem;$('btnNvNovo').disabled=!ok;$('btnNvList').disabled=!ok;$('btnNvExist').disabled=!ok||!NV.id;}
+function nvTraduz(e){const c=(e&&e.code||'')+' '+(e&&e.message||e||'');
+  if(/timeout/i.test(c))return 'Sem resposta do Firestore em 15 s. Verifique: internet/rede da empresa (firewall pode bloquear o Google) e se o banco Firestore foi criado no projeto.';
+  if(/permission|insufficient/i.test(c))return 'Sem permissão no Firestore: ajuste as regras de segurança para permitir leitura/gravação na coleção controle_medicao_bases.';
+  if(/not-found|NOT_FOUND|database .* does not exist|failed-precondition/i.test(c))return 'Banco Firestore não encontrado: crie o Firestore Database no console do projeto kz-planejamento-e-custos.';
+  if(/unavailable|offline/i.test(c))return 'Firestore indisponível/offline: verifique a internet ou bloqueio de rede.';
+  if(/api-key|API key|referer|referrer/i.test(c))return 'Chave de API recusada: verifique as restrições da chave no Google Cloud (domínios/referenciadores permitidos).';
+  if(/exceeds|too large|maximum/i.test(c))return 'Base maior que o limite de 1 MB por documento do Firestore.';
+  return 'Erro na nuvem: '+(e.message||e);}
+function nvErro(e){console.error('[Firebase]',e);msg('nvMsg',nvTraduz(e)+(e&&e.code?' (código: '+e.code+')':''),'warn');}
+const comTempo=(p,ms=15000)=>Promise.race([p,new Promise((_,r)=>setTimeout(()=>r({code:'timeout',message:'timeout'}),ms))]);
+function nvDados(){return JSON.stringify({versao:S.versao,logo:S.logo,contratos:S.contratos,medicoes:S.medicoes});}
+async function nvSalvarNovo(){const nome=$('nvDesc').value.trim()||('Base '+new Date().toLocaleString('pt-BR'));
+  try{msg('nvMsg','Salvando…','ok');const r=await comTempo(window.nuvem.criar(nome,nvDados(),{contratos:S.contratos.length,medicoes:S.medicoes.length}));
+    Object.assign(NV,{id:r.id,nome,versao:r.versao});msg('nvMsg','Nova base salva na nuvem: '+nome,'ok');nvBtns();rSetor();nvListar();}catch(e){nvErro(e);}}
+async function nvSalvarExistente(){if(!NV.id)return;
+  try{const atual=await comTempo(window.nuvem.versao(NV.id));
+    if(atual===null){msg('nvMsg','A base em uso não existe mais na nuvem. Use "Salvar na nuvem".','warn');return;}
+    if(NV.versao&&atual!==NV.versao&&!confirm('A base "'+NV.nome+'" foi alterada na nuvem por outra sessão depois que você a carregou. Sobrescrever mesmo assim?'))return;
+    if(!confirm('Sobrescrever a base "'+NV.nome+'" na nuvem com os dados atuais?'))return;
+    msg('nvMsg','Salvando…','ok');NV.versao=await comTempo(window.nuvem.atualizar(NV.id,nvDados(),{contratos:S.contratos.length,medicoes:S.medicoes.length}));
+    msg('nvMsg','Base "'+NV.nome+'" atualizada na nuvem.','ok');nvListar();}catch(e){nvErro(e);}}
+async function nvListar(){try{const l=await comTempo(window.nuvem.listar());const t=$('tbNuvem');
+  if(!l.length){t.innerHTML='<tr><td class="empty">Nenhuma base salva na nuvem.</td></tr>';return;}
+  t.innerHTML='<thead><tr><th>Base</th><th>Atualizada em</th><th class="n">Contratos</th><th class="n">Medições</th><th></th></tr></thead><tbody>'+
+   l.map(b=>`<tr class="${b.id===NV.id?'atual':''}"><td>${esc(b.nome)}${b.id===NV.id?' <span class="tag">em uso</span>':''}</td><td>${b.atualizadoEm?b.atualizadoEm.toLocaleString('pt-BR'):'—'}</td>
+   <td class="n">${b.resumo?.contratos??'—'}</td><td class="n">${b.resumo?.medicoes??'—'}</td><td><button class="b sec sm" onclick="nvCarregar('${b.id}')">Carregar</button></td></tr>`).join('')+'</tbody>';}catch(e){nvErro(e);}}
+async function nvCarregar(id){if((S.contratos.length||S.medicoes.length)&&!confirm('Substituir os dados atuais pelos da base da nuvem?'))return;
+  try{const b=await comTempo(window.nuvem.carregar(id));if(!b){msg('nvMsg','Base não encontrada.','warn');return;}
+    const d=JSON.parse(b.dados);S={versao:1,logo:d.logo||null,contratos:d.contratos||[],medicoes:d.medicoes||[]};S.contratos.forEach(c=>c.aditivos=c.aditivos||[]);S.medicoes.forEach(m=>delete m.evidencia);
+    Object.assign(NV,{id,nome:b.nome,versao:b.versao});$('nvDesc').value=b.nome;render();rSetor();nvBtns();nvListar();msg('nvMsg','Base carregada: '+b.nome,'ok');}catch(e){nvErro(e);}}
+window.addEventListener('nuvem-pronta',async e=>{nvStatus('SDK carregado (v'+(e.detail||'?')+') – testando acesso ao Firestore…');nvBtns();
+  try{await comTempo(window.nuvem.listar());nvStatus('Conectado ao Firestore (SDK v'+(e.detail||'?')+')','ok');if($('mdSetor').classList.contains('on'))nvListar();}
+  catch(err){console.error('[Firebase]',err);nvStatus(nvTraduz(err)+(err&&err.code&&err.code!=='timeout'?' (código: '+err.code+')':''),'er');}});
+window.addEventListener('nuvem-erro',e=>{nvStatus('Não foi possível carregar o SDK do Firebase: '+(e.detail||'verifique a internet ou bloqueio de rede a www.gstatic.com'),'er');nvBtns();});
+irPara('tResumo');nvBtns();
+</script>
+<script type="module">
+/* Firebase – projeto kz-planejamento-e-custos (config fornecida pelo usuário) */
+const VERSOES=['13.0.0','12.0.0']; // tenta a versão do script; se o CDN falhar, usa a 12.0.0
+const firebaseConfig={
+  apiKey:"AIzaSyCk1hdv3h8A2gDOcaZDRuRtceDiG2bvXOc",
+  authDomain:"kz-planejamento-e-custos.firebaseapp.com",
+  projectId:"kz-planejamento-e-custos",
+  storageBucket:"kz-planejamento-e-custos.firebasestorage.app",
+  messagingSenderId:"755715307647",
+  appId:"1:755715307647:web:b6911716af673ecbbae74a",
+  measurementId:"G-0TD20GL0PL"
+};
+let ultimoErro=null;
+for(const V of VERSOES){
+  try{
+    const {initializeApp}=await import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`);
+    const fs=await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
+    const app=initializeApp(firebaseConfig);
+    // long polling automático evita falhas de conexão em redes corporativas/proxy
+    const db=fs.initializeFirestore(app,{experimentalAutoDetectLongPolling:true});
+    const COL='controle_medicao_bases';
+    const novaVersao=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    window.nuvem={
+      async criar(nome,dados,resumo){const versao=novaVersao();
+        const r=await fs.addDoc(fs.collection(db,COL),{nome,dados,resumo,versao,criadoEm:fs.serverTimestamp(),atualizadoEm:fs.serverTimestamp()});return{id:r.id,versao};},
+      async atualizar(id,dados,resumo){const versao=novaVersao();
+        await fs.updateDoc(fs.doc(db,COL,id),{dados,resumo,versao,atualizadoEm:fs.serverTimestamp()});return versao;},
+      async versao(id){const s=await fs.getDocFromServer(fs.doc(db,COL,id));return s.exists()?s.data().versao:null;},
+      async carregar(id){const s=await fs.getDocFromServer(fs.doc(db,COL,id));return s.exists()?s.data():null;},
+      async listar(){const r=await fs.getDocsFromServer(fs.collection(db,COL));
+        return r.docs.map(d=>{const x=d.data();return{id:d.id,nome:x.nome,resumo:x.resumo,atualizadoEm:x.atualizadoEm?.toDate?.()};})
+          .sort((a,b)=>(b.atualizadoEm||0)-(a.atualizadoEm||0));}
+    };
+    window.dispatchEvent(new CustomEvent('nuvem-pronta',{detail:V}));ultimoErro=null;break;
+  }catch(e){ultimoErro=e;console.error('[Firebase] falha ao carregar SDK v'+V,e);}
+}
+if(ultimoErro)window.dispatchEvent(new CustomEvent('nuvem-erro',{detail:String(ultimoErro.message||ultimoErro)}));
 </script>
 </body>
 </html>
