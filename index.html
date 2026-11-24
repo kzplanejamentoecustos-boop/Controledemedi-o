@@ -2269,7 +2269,7 @@ img { max-width: 100%; display: block; }
 .ctc-fluxo--vertical .ctc-fluxo__detalhe { font-size: var(--ctc-fs-xs); }
 
 </style>
-<script src="./CTC App Base — Demonstração (dados fictícios)_files/tesseract.min.js.download"></script></head>
+</head>
 <body style="">
 <script>
 (function () {
@@ -5608,6 +5608,7 @@ function criarTelaEntrada({
       titulo: 'Abrir Versão (Nuvem)',
       textoAcao: 'Carregar',
       cartoes: true,
+      gerenciar: portalPermite('admin'),   // v2.4: Admin no Portal renomeia/exclui salvamentos
       projeto: projeto || (base?.identidade || {}).titulo || titulo,
       onEscolher: async (versao) => {
         if (!(await podeSubstituirBase())) return false;
@@ -6168,7 +6169,7 @@ function solicitarCredenciais({
  */
 async function abrirListaVersoes({
   armazenamento, titulo = 'Versões salvas', textoAcao = 'Abrir', varianteAcao = 'primary', onEscolher,
-  cartoes = false, projeto,
+  cartoes = false, projeto, gerenciar = false,
 } = {}) {
   let versoes;
   try {
@@ -6180,29 +6181,72 @@ async function abrirListaVersoes({
   let modal = null;
   /* v1.8: lista em cartoes (visual do Faturamento Direto), usada pela central de entrada */
   if (cartoes) {
-    const naNuvem = Boolean(armazenamento.obterConfig && armazenamento.obterConfig());
+    const naNuvem = Boolean((armazenamento.usandoFirebase && armazenamento.usandoFirebase()) || (armazenamento.obterConfig && armazenamento.obterConfig()));
     const ordenadas = [...versoes].sort((a, b) => String(b.salvoEm || '').localeCompare(String(a.salvoEm || '')));
-    const lista = ordenadas.map((versao) => {
+    const vazio = h('div', { class: 'ctc-empty' }, h('div', { class: 'ctc-empty__title' }, 'Nenhuma versão salva ainda'), 'Use "Salvar na nuvem" no painel do Controlador para criar a primeira.');
+    const caixaLista = h('div', { class: 'ctc-versoes__lista' });
+    const atualizarVazio = () => { const tem = caixaLista.children.length > 0; caixaLista.classList.toggle('ctc-hidden', !tem); vazio.classList.toggle('ctc-hidden', tem); };
+    /* v2.4: quem e Admin no Portal KZ renomeia e exclui salvamentos direto na lista */
+    const podeRenomear = gerenciar && typeof armazenamento.renomear === 'function';
+    const podeExcluir = gerenciar && typeof armazenamento.remover === 'function';
+    ordenadas.forEach((versao) => {
       const botao = criarBotao({ texto: textoAcao, variante: varianteAcao, tamanho: 'sm' });
       botao.addEventListener('click', async () => {
         const fechar = await comCarregamento(botao, () => onEscolher(versao));
         if (fechar !== false) modal.fechar();
       });
-      return h('div', { class: 'ctc-versoes__item' },
+      const elNome = h('b', {}, versao.nome || 'Sem nome');
+      let item = null;
+      const botaoRenomear = podeRenomear ? criarBotao({
+        icone: 'editar', variante: 'ghost', tamanho: 'sm', titulo: 'Renomear este salvamento',
+        onClick: async () => {
+          const nome = await solicitarValor({
+            titulo: 'Renomear salvamento', rotulo: 'Novo nome', obrigatorio: true,
+            regras: { minCaracteres: 3, maxCaracteres: 80 }, valor: versao.nome || '', textoConfirmar: 'Renomear',
+          });
+          if (nome == null || String(nome).trim() === versao.nome) return;
+          try {
+            await comCarregamento(botaoRenomear, () => armazenamento.renomear(versao.id, nome));
+            versao.nome = String(nome).trim();
+            elNome.textContent = versao.nome;
+            toast.sucesso('Salvamento renomeado', versao.nome);
+          } catch (erro) { toast.erro('Não foi possível renomear', erro.message); }
+        },
+      }) : null;
+      const botaoExcluir = podeExcluir ? criarBotao({
+        icone: 'lixeira', variante: 'ghost', tamanho: 'sm', titulo: 'Excluir este salvamento',
+        onClick: async () => {
+          const ok = await confirmar({
+            titulo: `Excluir "${versao.nome || 'Sem nome'}"?`,
+            mensagem: `O salvamento de ${formatarData(versao.salvoEm, 'data-hora')} será apagado da nuvem para todos. Não dá para desfazer.`,
+            textoConfirmar: 'Excluir', perigo: true,
+          });
+          if (!ok) return;
+          try {
+            await comCarregamento(botaoExcluir, () => armazenamento.remover(versao.id));
+            item.remove();
+            atualizarVazio();
+            toast.sucesso('Salvamento excluído', versao.nome || '');
+          } catch (erro) { toast.erro('Não foi possível excluir', erro.message); }
+        },
+      }) : null;
+      item = h('div', { class: 'ctc-versoes__item' },
         h('div', { class: 'ctc-versoes__textos' },
-          h('b', {}, versao.nome || 'Sem nome'),
+          elNome,
           h('small', {}, [formatarData(versao.salvoEm, 'data-hora'), versao.autor].filter(Boolean).join(' - '))),
-        botao);
+        h('div', { class: 'ctc-cluster', style: 'flex-wrap:nowrap;gap:6px' }, botaoRenomear, botaoExcluir, botao));
+      caixaLista.append(item);
     });
+    atualizarVazio();
     modal = criarModal({
       titulo: h('span', { class: 'ctc-versoes__titulo' }, criarIcone('nuvem', 18), titulo),
       tamanho: 'lg',
       destruirAoFechar: true,
       conteudo: [
-        h('p', { class: 'ctc-versoes__texto' }, `Escolha uma versão salva ${naNuvem ? 'no Firebase' : 'neste navegador'} para carregar. Isso vai substituir os dados atuais desta tela.`),
+        h('p', { class: 'ctc-versoes__texto' }, `Escolha uma versão salva ${naNuvem ? 'na nuvem' : 'neste navegador'} para carregar. Isso vai substituir os dados atuais desta tela.`),
         projeto ? h('div', { class: 'ctc-versoes__projeto' }, criarIcone('pasta', 18), `Projeto: ${projeto}`) : null,
-        lista.length ? h('div', { class: 'ctc-versoes__lista' }, lista)
-          : h('div', { class: 'ctc-empty' }, h('div', { class: 'ctc-empty__title' }, 'Nenhuma versão salva ainda'), 'Use "Salvar na nuvem" no painel do Controlador para criar a primeira.'),
+        caixaLista,
+        vazio,
       ],
       acoes: [],
     });
@@ -6690,7 +6734,7 @@ function mostrarCarregamento(tipo, sub = '', { logo, rodape = '', titulo, etapas
 /* ===== app.js ===== */
 /* =============================================================================
    Controle de Medição de Fornecedores — app.js
-   Versao: 2.3.0  (Rev37 no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador; v2.3: nuvem em pacotes)
+   Versao: 2.4.0  (Rev37 no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador; v2.3: nuvem em pacotes; v2.4: Controlador no menu, Admin renomeia/exclui salvamentos)
    Consórcio Santa Dulce · Setor de medição
 
    Todas as telas da Rev37: Painel (precisa de ação + visão financeira),
@@ -6972,6 +7016,14 @@ const KZ = (() => {
         }
         return { id, ...meta.data(), base: JSON.parse(conteudo) };
       }),
+      renomear: (id, nome) => executar(async ({ db, fs }) => {
+        const refMeta = fs.doc(db, ...colecao, id);
+        const atual = await fs.getDoc(refMeta);
+        if (!atual.exists()) throw new Error('Versão não encontrada na nuvem.');
+        const meta = { ...atual.data(), nome: String(nome).trim() };
+        await fs.setDoc(refMeta, meta);
+        return { id, ...meta };
+      }),
       remover: (id) => executar(async ({ db, fs }) => {
         const pacotes = await fs.getDocs(fs.collection(db, ...colecaoConteudo, id, 'pacotes'));
         for (let i = 0; i < pacotes.docs.length; i += 400) {
@@ -7103,6 +7155,8 @@ const armazenamento = {
   substituir: (...args) => armazenamentoAtivo().substituir(...args),
   abrir: (...args) => armazenamentoAtivo().abrir(...args),
   remover: (...args) => armazenamentoAtivo().remover(...args),
+  /** v2.4: renomear so existe na nuvem KZ (a lista mostra o botao apenas para Admin no Portal) */
+  get renomear() { return usuarioKZ ? (id, nome) => armazenamentoKZ.renomear(id, nome) : undefined; },
 };
 
 /** Logo da CSD para fundo claro (tela de entrada), com Belov, Carioca e CTC. */
@@ -10085,6 +10139,7 @@ function abrirAplicativo({ perfil, usuario, base, nomeArquivo }) {
     sair();
   };
 
+  const ID_MENU_CONTROLADOR = '__controlador';
   const botaoControlador = criarBotaoSessao({
     sessao,
     texto: 'Controlador',
@@ -10119,12 +10174,18 @@ function abrirAplicativo({ perfil, usuario, base, nomeArquivo }) {
       titulo: identidade.titulo,
       subtitulo: subtituloCabecalho(),
       logo: identidade.logo,
+      // v2.4: o Controlador (salvar, sessao, cabecalho) saiu do cabecalho e foi para o menu
       acoes: [
         { texto: 'Ajuda', icone: 'info', variante: 'outline', onClick: abrirAjuda },
-        botaoControlador,
       ],
     },
     menu: {
+      onNavegar: (id) => {
+        if (id !== ID_MENU_CONTROLADOR) return;
+        app.alternarMenu(false);
+        if (app.paginaAtual()) app.menu.definirAtivo(app.paginaAtual());
+        botaoControlador.click();
+      },
       secoes: [
         {
           titulo: 'Controle',
@@ -10146,8 +10207,12 @@ function abrirAplicativo({ perfil, usuario, base, nomeArquivo }) {
             },
           ],
         },
+        {
+          titulo: 'Ferramentas',
+          itens: [{ id: ID_MENU_CONTROLADOR, texto: 'Controlador', emoji: '🛠️' }],
+        },
       ],
-      rodape: 'Controle de Medição · CTC App Standard v1.9',
+      rodape: 'Controle de Medição v2.4.0 · CTC App Standard v1.9',
     },
     paginas: {
       painel: {
@@ -10208,7 +10273,7 @@ const telaEntrada = criarTelaEntrada({
   armazenamento,
   criarBaseNova,
   textoBaseInicial: 'Nenhum arquivo carregado ainda: será usada a base de demonstração com dados fictícios.',
-  rodape: 'Controle de Medição v2.3.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
+  rodape: 'Controle de Medição v2.4.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
   nomeControle: NOME_CONTROLE_KZ,
   onLoginPortal: async () => { await garantirLoginKZ(); return true; },
   rotuloImportar: '1. Importar dados da obra',
