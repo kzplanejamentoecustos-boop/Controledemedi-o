@@ -6690,7 +6690,7 @@ function mostrarCarregamento(tipo, sub = '', { logo, rodape = '', titulo, etapas
 /* ===== app.js ===== */
 /* =============================================================================
    Controle de Medição de Fornecedores — app.js
-   Versao: 2.2.0  (Rev37 completa no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador)
+   Versao: 2.3.0  (Rev37 no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador; v2.3: nuvem em pacotes)
    Consórcio Santa Dulce · Setor de medição
 
    Todas as telas da Rev37: Painel (precisa de ação + visão financeira),
@@ -6876,51 +6876,109 @@ const KZ = (() => {
   });
 
   /**
-   * Versoes do controle DENTRO da obra (mesmo formato dos outros controles KZ):
-   *   obras/{obra}/{controle}/{id}            -> { nome, salvoEm, autor, tamanho }
-   *   obras/{obra}/{controle}_conteudo/{id}   -> { conteudo: "<base JSON em texto>" }
+   * v2.3: divide o texto em pacotes de ate ~900 KB (medidos em bytes UTF-8: o Firestore aceita
+   * no maximo 1 MB por documento). Nunca corta um caractere especial ao meio.
    */
-  function criarArmazenamentoObra({ obra, controle, limite = 900000 }) {
+  function dividirEmPacotes(texto, maxBytes = 900000) {
+    const cod = new TextEncoder();
+    const pacotes = [];
+    let i = 0;
+    while (i < texto.length) {
+      let fim = Math.min(texto.length, i + maxBytes);
+      while (cod.encode(texto.slice(i, fim)).length > maxBytes) fim = i + Math.floor((fim - i) * 0.9);
+      // nao separa um par substituto (emoji etc.)
+      const c = texto.charCodeAt(fim - 1);
+      if (fim < texto.length && c >= 0xd800 && c <= 0xdbff) fim -= 1;
+      pacotes.push(texto.slice(i, fim));
+      i = fim;
+    }
+    return pacotes.length ? pacotes : [''];
+  }
+
+  /**
+   * Versoes do controle DENTRO da obra:
+   *   obras/{obra}/{controle}/{id}                       -> { nome, salvoEm, autor, tamanho }
+   *   obras/{obra}/{controle}_conteudo/{id}              -> { conteudo } (formato antigo, um documento)
+   *                                                       ou { pacotes: n, slot: 'a'|'b', tamanho } (v2.3)
+   *   obras/{obra}/{controle}_conteudo/{id}/pacotes/{slot}000..  -> { texto } (cada pacote <= ~900 KB)
+   * v2.3: salva em pacotes, sem o limite de 900 KB por base. Cada salvamento grava no "slot" que nao
+   * esta em uso e so no fim troca o apontador: se a internet cair no meio, a versao anterior segue
+   * inteira. Nao precisa apagar nada ao substituir (o Editor no Portal nao tem permissao de excluir).
+   */
+  function criarArmazenamentoObra({ obra, controle }) {
     const colecao = ['obras', obra, controle];
     const colecaoConteudo = ['obras', obra, `${controle}_conteudo`];
-    const serializar = (base) => {
-      const conteudo = JSON.stringify(base);
-      if (conteudo.length > limite) throw new Error(`A base tem ${Math.round(conteudo.length / 1024)} KB e passa do limite de cerca de 900 KB por salvamento. Reduza os anexos/logo ou fale com o suporte.`);
-      return conteudo;
-    };
+    const POR_LOTE = 5;   // pacotes por gravacao (cada gravacao do Firestore aceita ate ~10 MB)
+    const nomePacote = (slot, i) => `${slot}${String(i).padStart(3, '0')}`;
+
+    async function gravarPacotes({ db, fs }, id, slot, pacotes) {
+      for (let i = 0; i < pacotes.length; i += POR_LOTE) {
+        const lote = fs.writeBatch(db);
+        pacotes.slice(i, i + POR_LOTE).forEach((texto, j) => {
+          lote.set(fs.doc(db, ...colecaoConteudo, id, 'pacotes', nomePacote(slot, i + j)), { texto });
+        });
+        await lote.commit();
+      }
+    }
+
+    async function gravar(sdkFb, { id, refMeta, meta, conteudo, slotAtual }) {
+      const { db, fs } = sdkFb;
+      const pacotes = dividirEmPacotes(conteudo);
+      const slot = slotAtual === 'a' ? 'b' : 'a';
+      await gravarPacotes(sdkFb, id, slot, pacotes);
+      // por ultimo, os dois apontadores juntos: a versao so muda quando todos os pacotes ja estao gravados
+      const lote = fs.writeBatch(db);
+      lote.set(refMeta, meta);
+      lote.set(fs.doc(db, ...colecaoConteudo, id), { pacotes: pacotes.length, slot, tamanho: conteudo.length });
+      await lote.commit();
+    }
+
     return {
       listar: () => executar(async ({ db, fs }) => {
         const r = await fs.getDocs(fs.query(fs.collection(db, ...colecao), fs.orderBy('salvoEm', 'desc')));
         return r.docs.map((d) => ({ id: d.id, ...d.data() }));
       }),
-      salvar: ({ nome, base, autor }) => executar(async ({ db, fs }) => {
-        const conteudo = serializar(base);
-        const ref = fs.doc(fs.collection(db, ...colecao));
+      salvar: ({ nome, base, autor }) => executar(async (sdkFb) => {
+        const { db, fs } = sdkFb;
+        const conteudo = JSON.stringify(base);
+        const refMeta = fs.doc(fs.collection(db, ...colecao));
         const meta = { nome: String(nome).trim(), salvoEm: new Date().toISOString(), autor: autor || '', tamanho: conteudo.length };
-        const lote = fs.writeBatch(db);
-        lote.set(ref, meta);
-        lote.set(fs.doc(db, ...colecaoConteudo, ref.id), { conteudo });
-        await lote.commit();
-        return { id: ref.id, ...meta };
+        await gravar(sdkFb, { id: refMeta.id, refMeta, meta, conteudo, slotAtual: null });
+        return { id: refMeta.id, ...meta };
       }),
-      substituir: (id, { base, autor }) => executar(async ({ db, fs }) => {
-        const conteudo = serializar(base);
+      substituir: (id, { base, autor }) => executar(async (sdkFb) => {
+        const { db, fs } = sdkFb;
+        const conteudo = JSON.stringify(base);
         const refMeta = fs.doc(db, ...colecao, id);
-        const atual = await fs.getDoc(refMeta);
+        const [atual, dados] = await Promise.all([fs.getDoc(refMeta), fs.getDoc(fs.doc(db, ...colecaoConteudo, id))]);
         if (!atual.exists()) throw new Error('Versão não encontrada na nuvem.');
         const meta = { ...atual.data(), salvoEm: new Date().toISOString(), autor: autor || atual.data().autor || '', tamanho: conteudo.length };
-        const lote = fs.writeBatch(db);
-        lote.set(refMeta, meta);
-        lote.set(fs.doc(db, ...colecaoConteudo, id), { conteudo });
-        await lote.commit();
+        const slotAtual = dados.exists() ? dados.data().slot || null : null;
+        await gravar(sdkFb, { id, refMeta, meta, conteudo, slotAtual });
         return { id, ...meta };
       }),
       abrir: (id) => executar(async ({ db, fs }) => {
         const [meta, dados] = await Promise.all([fs.getDoc(fs.doc(db, ...colecao, id)), fs.getDoc(fs.doc(db, ...colecaoConteudo, id))]);
         if (!meta.exists() || !dados.exists()) throw new Error('Versão não encontrada na nuvem.');
-        return { id, ...meta.data(), base: JSON.parse(dados.data().conteudo) };
+        const d = dados.data();
+        let conteudo;
+        if (typeof d.conteudo === 'string') conteudo = d.conteudo;   // formato antigo (um documento)
+        else {
+          const partes = await Promise.all(Array.from({ length: d.pacotes || 0 }, (_, i) =>
+            fs.getDoc(fs.doc(db, ...colecaoConteudo, id, 'pacotes', nomePacote(d.slot, i)))));
+          if (partes.some((p) => !p.exists())) throw new Error('Versão incompleta na nuvem (faltam pacotes). Abra outra versão.');
+          conteudo = partes.map((p) => p.data().texto).join('');
+          if (d.tamanho && conteudo.length !== d.tamanho) throw new Error('Versão incompleta na nuvem (tamanho não confere). Abra outra versão.');
+        }
+        return { id, ...meta.data(), base: JSON.parse(conteudo) };
       }),
       remover: (id) => executar(async ({ db, fs }) => {
+        const pacotes = await fs.getDocs(fs.collection(db, ...colecaoConteudo, id, 'pacotes'));
+        for (let i = 0; i < pacotes.docs.length; i += 400) {
+          const lote = fs.writeBatch(db);
+          pacotes.docs.slice(i, i + 400).forEach((p) => lote.delete(p.ref));
+          await lote.commit();
+        }
         const lote = fs.writeBatch(db);
         lote.delete(fs.doc(db, ...colecao, id));
         lote.delete(fs.doc(db, ...colecaoConteudo, id));
@@ -6929,7 +6987,7 @@ const KZ = (() => {
     };
   }
 
-  return { iniciar, usuarioAtual, entrar, redefinirSenha, obraDaUrl, acessoNaObra, obrasComAcesso, criarArmazenamentoObra, PAPEIS };
+  return { iniciar, usuarioAtual, entrar, redefinirSenha, obraDaUrl, acessoNaObra, obrasComAcesso, criarArmazenamentoObra, dividirEmPacotes, PAPEIS };
 })();
 
 let obraNuvem = KZ.obraDaUrl();
@@ -10150,7 +10208,7 @@ const telaEntrada = criarTelaEntrada({
   armazenamento,
   criarBaseNova,
   textoBaseInicial: 'Nenhum arquivo carregado ainda: será usada a base de demonstração com dados fictícios.',
-  rodape: 'Controle de Medição v2.2.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
+  rodape: 'Controle de Medição v2.3.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
   nomeControle: NOME_CONTROLE_KZ,
   onLoginPortal: async () => { await garantirLoginKZ(); return true; },
   rotuloImportar: '1. Importar dados da obra',
