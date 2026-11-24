@@ -5767,6 +5767,10 @@ function criarTelaEntrada({
                 botao.title = 'Mostrar senha';
                 return;
               }
+              if (!senhaMestra) {
+                toast.info('Senha protegida', 'Sem a senha do administrador (v2.2) as senhas dos controladores não são mostradas. Se alguém esqueceu, remova e cadastre de novo.');
+                return;
+              }
               if (!linha.senhaCifrada || !criptografiaDisponivel()) {
                 toast.aviso('Senha não disponível', 'Este controlador foi cadastrado antes desta versão. Remova-o e cadastre de novo para poder visualizar a senha.');
                 return;
@@ -5930,21 +5934,24 @@ function criarTelaEntrada({
     modalAdmin.abrir();
   }
 
+  /* v2.2: sem senha do administrador. A aba Administrador abre para quem tem papel Admin neste controle
+     no Portal KZ (gestor da obra e gestor geral ja sao Admin); sem o login do Portal, pede o login primeiro. */
   async function entrarAdministrador() {
-    if (acessoPortal) {
-      criarModal({
-        titulo: 'Acessos da equipe',
-        tamanho: 'sm',
-        destruirAoFechar: true,
-        conteudo: h('p', {}, `Com o login do Portal KZ não há controladores nem senhas nesta base: o acesso de cada pessoa (Leitor, Editor ou Admin) ao ${nomeControle} é liberado pelo gestor da obra no Portal KZ.`),
-        acoes: portalPermite('editor')
-          ? [{ texto: 'Fechar', variante: 'outline' }, { texto: 'Entrar como Controlador', variante: 'primary', onClick: () => { if (exigirBase()) entrar('controlador', usuarioPortal()); } }]
-          : [{ texto: 'Entendi', variante: 'primary' }],
-      }).abrir();
+    if (!acessoPortal) {
+      if (typeof onLoginPortal === 'function' && await loginPortal() && acessoPortal) entrarAdministrador();
+      else if (typeof onLoginPortal !== 'function') toast.aviso('Login do Portal KZ', 'A administração é liberada pelo login Admin do Portal KZ.');
       return;
     }
-    const senha = await solicitarSenhaAdministrador({ administrador, titulo: 'Acesso do Administrador', textoConfirmar: 'Entrar' });
-    if (senha) abrirAdministracao(senha);
+    if (portalPermite('admin') || acessoPortal.gestor) { abrirAdministracao(null); return; }
+    criarModal({
+      titulo: 'Só para Admin',
+      tamanho: 'sm',
+      destruirAoFechar: true,
+      conteudo: h('p', {}, `A administração do ${nomeControle} é liberada para quem tem acesso Admin na obra ${acessoPortal.sigla} no Portal KZ. Seu acesso é ${papelPortalTxt()}.`),
+      acoes: portalPermite('editor')
+        ? [{ texto: 'Fechar', variante: 'outline' }, { texto: 'Entrar como Controlador', variante: 'primary', onClick: () => { if (exigirBase()) entrar('controlador', usuarioPortal()); } }]
+        : [{ texto: 'Entendi', variante: 'primary' }],
+    }).abrir();
   }
 
   /* ---- Iniciar controle: base em branco, liberada pela senha do administrador ---- */
@@ -5957,18 +5964,15 @@ function criarTelaEntrada({
       });
       if (!ok) return;
     }
-    if (acessoPortal && !portalPermite('admin')) {
-      toast.aviso('Sem permissão', `Criar um projeto novo é só para quem é Admin do ${nomeControle} no Portal KZ.`);
+    // v2.2: sem senha do administrador; o Projeto novo vem do login do Portal (papel Admin ou gestor)
+    if (!acessoPortal) {
+      if (typeof onLoginPortal === 'function' && await loginPortal() && acessoPortal) iniciarControle();
+      else if (typeof onLoginPortal !== 'function') toast.aviso('Login do Portal KZ', 'O projeto novo é liberado pelo login do Portal KZ.');
       return;
     }
-    if (!acessoPortal) {
-      const senha = await solicitarSenhaAdministrador({
-        administrador,
-        titulo: 'Iniciar controle',
-        mensagem: 'Informe a senha do administrador para criar uma base em branco.',
-        textoConfirmar: 'Criar base em branco',
-      });
-      if (!senha) return;
+    if (!portalPermite('admin')) {
+      toast.aviso('Sem permissão', `Criar um projeto novo é só para quem é Admin do ${nomeControle} no Portal KZ.`);
+      return;
     }
     const nova = typeof criarBaseNova === 'function' ? criarBaseNova() : criarBaseVazia(formato);
     base = validarBase({ ...nova, formato }, { formato }).base;
@@ -6027,7 +6031,7 @@ function criarTelaEntrada({
         h('div', { class: 'ctc-entrada__grade ctc-entrada__grade--3' },
           cartao({ nome: 'olho', cor: 'cinza', texto: 'Visualizador', sub: 'Consulta', onClick: entrarVisualizador }),
           cartao({ nome: 'editar', cor: 'azul', texto: 'Controlador', sub: 'Edita e salva', onClick: entrarControlador }),
-          cartao({ nome: 'escudo', cor: 'roxo', texto: 'Administrador', sub: 'Acessos', onClick: entrarAdministrador })),
+          cartao({ nome: 'escudo', cor: 'roxo', texto: 'Administrador', sub: 'Admin no Portal', onClick: entrarAdministrador })),
         rodape ? h('div', { class: 'ctc-entrada__rodape' }, rodape) : null)));
 
   atualizarStatus();
@@ -6686,7 +6690,7 @@ function mostrarCarregamento(tipo, sub = '', { logo, rodape = '', titulo, etapas
 /* ===== app.js ===== */
 /* =============================================================================
    Controle de Medição de Fornecedores — app.js
-   Versao: 2.1.0  (Rev37 completa no CTC App Standard v1.7.0; v2.1: login do Portal KZ)
+   Versao: 2.2.0  (Rev37 completa no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador)
    Consórcio Santa Dulce · Setor de medição
 
    Todas as telas da Rev37: Painel (precisa de ação + visão financeira),
@@ -6725,11 +6729,8 @@ function mostrarCarregamento(tipo, sub = '', { logo, rodape = '', titulo, etapas
 
 const FORMATO_BASE = 'controle-medicao';
 
-/** Senha do administrador: só o resumo SHA-256 de "sal:senha" (mesmo do modelo CTC). */
-const ADMINISTRADOR = {
-  sal: 'ctc-admin',
-  hash: 'dce284d396efd4b1ee7817cbadca86e6df502d36e2359397922e55e321d4b0c4',
-};
+/** v2.2: sem senha do administrador. A administracao e liberada para quem e gestor no Portal KZ. */
+const ADMINISTRADOR = {};
 
 const NOME_PERFIL = { controlador: 'Controlador', visualizador: 'Visualizador', administrador: 'Administrador' };
 
@@ -6848,11 +6849,13 @@ const KZ = (() => {
       fs.getDoc(fs.doc(db, 'usuarios', u.uid)),
     ]);
     const nome = (cadastro.exists() && cadastro.data().nome) || u.displayName || u.email;
-    if (!o.exists()) return { papel: '', controle: CONTROLE_KZ_PADRAO, obra: null, nome };
+    if (!o.exists()) return { papel: '', gestor: false, controle: CONTROLE_KZ_PADRAO, obra: null, nome };
     const dadosObra = { id: obra, ...o.data() };
     const controle = codigoNaObra(dadosObra);
     const papel = gg.exists() ? 'admin' : (m.exists() ? papelNoControle(m.data(), controle) : '');
-    return { papel, controle, obra: dadosObra, nome };
+    // v2.2: gestor no Portal (gestor geral ou gestor da obra) libera a aba Administrador
+    const gestor = gg.exists() || Boolean(m.exists() && m.data().gestor);
+    return { papel, gestor, controle, obra: dadosObra, nome };
   });
 
   /** Obras em que este login tem acesso a este controle: [{ id, nome, sigla, papel }]. */
@@ -7020,7 +7023,7 @@ function garantirLoginKZ({ pedirLogin = true } = {}) {
       if (!acesso.obra) throw new Error(`A obra "${obraNuvem}" não existe no Portal KZ. Confira o link recebido.`);
       if (!acesso.papel) throw new Error(`Seu login (${user.email}) não tem acesso ao ${NOME_CONTROLE_KZ} na obra ${acesso.obra.sigla || obraNuvem}. Fale com o gestor da obra.`);
       armazenamentoKZ = KZ.criarArmazenamentoObra({ obra: obraNuvem, controle: acesso.controle });
-      usuarioKZ = { email: user.email, nome: acesso.nome, papel: acesso.papel, sigla: acesso.obra.sigla || obraNuvem, obra: obraNuvem, controle: acesso.controle };
+      usuarioKZ = { email: user.email, nome: acesso.nome, papel: acesso.papel, gestor: acesso.gestor, sigla: acesso.obra.sigla || obraNuvem, obra: obraNuvem, controle: acesso.controle };
       try { localStorage.setItem('kz-portal-obra', obraNuvem); } catch (erro) { /* sem armazenamento */ }
       telaEntrada.definirAcessoPortal({ ...usuarioKZ });
       return usuarioKZ;
@@ -10147,7 +10150,7 @@ const telaEntrada = criarTelaEntrada({
   armazenamento,
   criarBaseNova,
   textoBaseInicial: 'Nenhum arquivo carregado ainda: será usada a base de demonstração com dados fictícios.',
-  rodape: 'Controle de Medição v2.1.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
+  rodape: 'Controle de Medição v2.2.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
   nomeControle: NOME_CONTROLE_KZ,
   onLoginPortal: async () => { await garantirLoginKZ(); return true; },
   rotuloImportar: '1. Importar dados da obra',
