@@ -6734,7 +6734,7 @@ function mostrarCarregamento(tipo, sub = '', { logo, rodape = '', titulo, etapas
 /* ===== app.js ===== */
 /* =============================================================================
    Controle de Medição de Fornecedores — app.js
-   Versao: 2.6.3  (Rev37 no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador; v2.3: nuvem em pacotes; v2.4: Controlador no menu, Admin renomeia/exclui salvamentos; v2.5: Previsão pelo cronograma P6, contratos fora do controle, BM atual pelas assinaturas; v2.6.1: datas de NF, vencimento e pagamento no fluxo de caixa; v2.6.2: Previsão sem a tabela por mês de pagamento, "Ocultar após 3 meses", Base de cálculo como ícone ao lado do nome; v2.6.3: pagamento no vencimento em dia útil, NF nunca no passado, feriados de Carnaval/Corpus Christi/Salvador, VENCIMENTO em dias com fórmula E+F)
+   Versao: 2.6.4  (Rev37 no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador; v2.3: nuvem em pacotes; v2.4: Controlador no menu, Admin renomeia/exclui salvamentos; v2.5: Previsão pelo cronograma P6, contratos fora do controle, BM atual pelas assinaturas; v2.6.1: datas de NF, vencimento e pagamento no fluxo de caixa; v2.6.2: Previsão sem a tabela por mês de pagamento, "Ocultar após 3 meses", Base de cálculo como ícone ao lado do nome; v2.6.3: pagamento no vencimento em dia útil, NF nunca no passado, feriados de Carnaval/Corpus Christi/Salvador, VENCIMENTO em dias com fórmula E+F; v2.6.4: seletor "Colunas" com chaves para ocultar tudo e escolher o que aparece)
    Consórcio Santa Dulce · Setor de medição
 
    Todas as telas da Rev37: Painel (precisa de ação + visão financeira),
@@ -9818,9 +9818,78 @@ function abaImportarRev37() {
    ========================================================================== */
 const prevDB = () => { S.previsao = S.previsao || { itens: [] }; S.previsao.itens = S.previsao.itens || []; return S.previsao; };
 const prevDe = (cid) => prevDB().itens.find((p) => p.ctId === cid) || null;
-let ocultar3m = (() => { try { return localStorage.getItem('prev.ocultar3m') === '1'; } catch (e) { return false; } })(); // v2.6.2: oculta as colunas "a medir" depois do mês atual + 3 (v2.6.3: fica lembrado neste navegador)
+/* v2.6.4: escolha das colunas da tabela "A medir — por contrato" (lembrada neste navegador).
+   padrao 'mostrar' = aparecem todas, menos as de excecoes; padrao 'ocultar' = nenhuma aparece, só as de excecoes.
+   Assim, "ocultar tudo" e depois ligar só o que interessa continua valendo quando surgem meses novos. */
+const colsPrev = (() => {
+  try { const v = JSON.parse(localStorage.getItem('prev.colunas') || 'null'); if (v && (v.padrao === 'mostrar' || v.padrao === 'ocultar') && Array.isArray(v.excecoes)) return v; } catch (e) { /* sem armazenamento */ }
+  return { padrao: 'mostrar', excecoes: [] };
+})();
+const salvarColsPrev = () => { try { localStorage.setItem('prev.colunas', JSON.stringify(colsPrev)); } catch (e) { /* sem armazenamento */ } };
+const colPrevVisivel = (k) => (colsPrev.padrao === 'mostrar') !== colsPrev.excecoes.includes(k);
+function definirColPrev(k, visivel) {
+  const deveSerExcecao = (colsPrev.padrao === 'mostrar') !== visivel;
+  colsPrev.excecoes = colsPrev.excecoes.filter((x) => x !== k);
+  if (deveSerExcecao) colsPrev.excecoes.push(k);
+}
+let painelColsAberto = false;
+(function estiloColsPrev() {
+  if (document.getElementById('prev-cols-estilo')) return;
+  document.head.append(h('style', { id: 'prev-cols-estilo' }, `
+.prev-sw{position:relative;flex:none;width:36px;height:20px;border-radius:10px;border:none;padding:0;background:#cbd5e1;cursor:pointer;transition:background .15s}
+.prev-sw::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s,background .15s}
+.prev-sw[aria-checked="true"]{background:#86d9a3}
+.prev-sw[aria-checked="true"]::after{left:19px;width:16px;height:16px;top:2px;background:#16a34a;box-shadow:0 0 0 1px #15803d}
+.prev-sw[aria-checked="mixed"]{background:#bbf7d0}
+.prev-sw[aria-checked="mixed"]::after{left:11px;background:#4ade80}
+.prev-sw:focus-visible{outline:2px solid #0284c7;outline-offset:2px}
+.prev-cols-panel{min-width:320px;max-height:460px;overflow:auto;padding:6px 0}
+.prev-cols-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 14px;font-size:13px}
+.prev-cols-row:hover{background:var(--ctc-neutral-50,#f8fafc)}
+.prev-cols-row--mestre{font-weight:600;border-bottom:1px solid var(--ctc-neutral-100,#f1f5f9);padding:8px 14px}
+.prev-cols-grupo{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ctc-neutral-500,#64748b);padding-top:10px}
+.prev-cols-row--item{padding-left:24px}
+.prev-cols-atalhos{display:flex;gap:12px;padding:6px 14px 8px;border-bottom:1px solid var(--ctc-neutral-100,#f1f5f9)}
+`));
+  document.addEventListener('click', (ev) => {
+    const aberto = document.querySelector('.prev-cols .ctc-dropdown__panel.is-open');
+    if (aberto && !ev.target.closest('.prev-cols')) { aberto.classList.remove('is-open'); painelColsAberto = false; }
+  });
+})();
+/** Chave liga/desliga (estado: true | false | 'mixed'). */
+function chaveLigaPrev(estado, rotulo, onMudar) {
+  return h('button', { type: 'button', class: 'prev-sw', role: 'switch', 'aria-checked': String(estado), 'aria-label': rotulo, title: rotulo, onClick: (ev) => { ev.stopPropagation(); onMudar(); } });
+}
+/** Seletor "Colunas": grupos = [{ titulo, itens: [{ k, rotulo }] }]. */
+function seletorColunasPrev(grupos, { limite3m } = {}) {
+  const todos = grupos.flatMap((g) => g.itens.map((i) => i.k));
+  const vis = todos.filter(colPrevVisivel).length;
+  const estadoDe = (ks) => { const n = ks.filter(colPrevVisivel).length; return n === 0 ? false : (n === ks.length ? true : 'mixed'); };
+  const aplicar = () => { salvarColsPrev(); painelColsAberto = true; redesenhar(); };
+  const mestre = estadoDe(todos);
+  const painel = h('div', { class: `ctc-dropdown__panel prev-cols-panel${painelColsAberto ? ' is-open' : ''}`, onClick: (ev) => ev.stopPropagation() },
+    h('div', { class: 'prev-cols-row prev-cols-row--mestre' }, h('span', {}, mestre === true ? 'Todas as colunas visíveis' : (mestre === false ? 'Todas as colunas ocultas' : `${vis} de ${todos.length} colunas visíveis`)),
+      chaveLigaPrev(mestre, mestre === true ? 'Ocultar todas as colunas' : 'Mostrar todas as colunas', () => { colsPrev.padrao = mestre === true ? 'ocultar' : 'mostrar'; colsPrev.excecoes = []; aplicar(); })),
+    h('div', { class: 'prev-cols-atalhos' },
+      h('button', { type: 'button', class: 'ctc-link', onClick: () => { colsPrev.padrao = 'ocultar'; colsPrev.excecoes = []; aplicar(); } }, 'Ocultar tudo'),
+      h('button', { type: 'button', class: 'ctc-link', onClick: () => { colsPrev.padrao = 'mostrar'; colsPrev.excecoes = []; aplicar(); } }, 'Mostrar tudo'),
+      limite3m ? h('button', { type: 'button', class: 'ctc-link', title: `Mostra os meses a medir só até ${mesTxt(limite3m)} (mês atual + 3)`, onClick: () => { colsPrev.padrao = 'mostrar'; colsPrev.excecoes = todos.filter((k) => k.startsWith('f_') && k.slice(2) > limite3m); aplicar(); } }, 'Só até 3 meses') : null),
+    grupos.filter((g) => g.itens.length).map((g) => {
+      const ks = g.itens.map((i) => i.k); const eg = estadoDe(ks);
+      return [
+        h('div', { class: 'prev-cols-row prev-cols-grupo' }, h('span', {}, g.titulo),
+          ks.length > 1 ? chaveLigaPrev(eg, `${eg === true ? 'Ocultar' : 'Mostrar'} ${g.titulo}`, () => { ks.forEach((k) => definirColPrev(k, eg !== true)); aplicar(); }) : null),
+        ...g.itens.map((i) => h('div', { class: 'prev-cols-row prev-cols-row--item' }, h('span', {}, i.rotulo),
+          chaveLigaPrev(colPrevVisivel(i.k), `${colPrevVisivel(i.k) ? 'Ocultar' : 'Mostrar'} ${i.rotulo}`, () => { definirColPrev(i.k, !colPrevVisivel(i.k)); aplicar(); }))),
+      ];
+    }));
+  const botao = h('button', {
+    type: 'button', class: 'ctc-btn ctc-btn--outline ctc-btn--sm', 'aria-haspopup': 'true', 'aria-expanded': String(painelColsAberto),
+    onClick: (ev) => { ev.stopPropagation(); const abrir = !painel.classList.contains('is-open'); painel.classList.toggle('is-open', abrir); painelColsAberto = abrir; botao.setAttribute('aria-expanded', String(abrir)); },
+  }, criarIcone('tabela', 14), ` Colunas (${vis} de ${todos.length})`, criarIcone('chevron-baixo', 14));
+  return h('div', { class: 'ctc-dropdown prev-cols' }, botao, painel);
+}
 let filtroOrigem = 'todos';
-let ocultarConcl = false;
 const mesMed = (m) => String(m.envioAss || m.data || m.fim || m.ini || '').slice(0, 7);
 const padraoPrev = () => { const P = prevDB(); P.padrao = { mesBase: hojeISO().slice(0, 7), diaIni: 26, diaFim: 25, ...(P.padrao || {}) }; return P.padrao; };
 const dataDia = (mes, dia) => { const [a, mm] = mes.split('-').map(Number); const ult = new Date(a, mm, 0).getDate(); return `${mes}-${p2(Math.min(Number(dia) || 1, ult))}`; };
@@ -9962,7 +10031,6 @@ function paginaPrevisao() {
     mesesPrev.forEach((mes) => { l[`f_${mes}`] = r2(l.meds.filter((x) => x.comp === mes).reduce((s2, x) => s2 + num(x.valor), 0)); });
   });
   const limite3m = somaMes(mesAtual, 3);
-  const mesesPrevVis = ocultar3m ? mesesPrev.filter((mes) => mes <= limite3m) : mesesPrev;
   const zero = (concl) => h('div', { class: concl ? 'prev-bm prev-bm--concl' : 'ctc-text-muted' }, h('div', { class: 'ctc-num' }, '—'));
   const celValorGlobal = (l) => (l.globalEst
     ? h('div', { title: l.valorTxt || '' }, criarBadge({ texto: 'por unidade', variante: 'info' }), h('div', { class: 'ctc-text-xs ctc-text-muted' }, l.globalTxt + ' (est.)'))
@@ -10000,12 +10068,12 @@ function paginaPrevisao() {
           : moeda(v))) },
       { campo: 'pp', titulo: '% medido', render: (_, l) => (l.pp == null ? h('span', { class: 'ctc-text-muted' }, '—') : pct(l.pp)) },
       { campo: 'perm', titulo: 'Permanência', render: (v, l) => h('div', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, v) },
-      ...(ocultarConcl ? [] : mesesConcl.map((mes) => ({ campo: `c_${mes}`, titulo: mesTxt(mes), tipo: 'moeda', total: 'soma', classe: 'prev-col-concl',
+      ...(mesesConcl.map((mes) => ({ campo: `c_${mes}`, titulo: mesTxt(mes), tipo: 'moeda', total: 'soma', classe: 'prev-col-concl',
         render: (_, l) => { if (l.origem !== 'controle') return h('span', { class: 'ctc-text-muted' }, '—'); const bs = l.concl.filter((x) => mesMed(x) === mes); return bs.length ? h('div', {}, bs.map((x) => cardBM(x, false))) : zero(true); } }))),
       { campo: 'bat', titulo: 'Medição atual (sem assinatura da Jeane)', tipo: 'moeda', total: 'soma',
         render: (_, l) => { if (l.origem !== 'controle' || !l.atuais.length) return h('span', { class: 'ctc-text-muted' }, '—'); return h('div', {}, l.atuais.map((x) => cardBM(x, true))); } },
       { campo: 'tot', titulo: 'A medir (total)', tipo: 'moeda', total: 'soma', render: (_, l) => h('b', {}, moeda(l.tot)) },
-      ...mesesPrevVis.map((mes) => ({ campo: `f_${mes}`, titulo: `${mesTxt(mes)} · a medir`, tipo: 'moeda', total: 'soma', render: (_, l) => celAmedir(l, mes) })),
+      ...mesesPrev.map((mes) => ({ campo: `f_${mes}`, titulo: `${mesTxt(mes)} · a medir`, tipo: 'moeda', total: 'soma', render: (_, l) => celAmedir(l, mes) })),
       { campo: 'si', titulo: 'Situação', ordenavel: false, render: (v) => criarBadge({ texto: v.txt, variante: v.t }) },
       {
         campo: 'acoes', titulo: '', ordenavel: false, classe: 'ctc-col--actions',
@@ -10013,8 +10081,15 @@ function paginaPrevisao() {
           editavel ? criarBotao({ icone: 'editar', variante: 'ghost', tamanho: 'sm', titulo: `Editar ${l.lb}`, onClick: () => (l.origem === 'controle' ? editarPrev(l.c) : editarNovo(l.idx)) }) : null,
           editavel ? criarBotao({ icone: 'fechar', variante: 'ghost', tamanho: 'sm', titulo: `Remover ${l.lb} da previsão`, onClick: () => removerDaPrevisao(l) }) : null),
       },
-    ],
+    ].filter((c) => c.campo === 'lb' || c.campo === 'acoes' || colPrevVisivel(c.campo)),
   });
+  const seletorCols = seletorColunasPrev([
+    { titulo: 'Dados do contrato', itens: [['globalNum', 'Valor do contrato'], ['medConsol', 'Acumulado consolidado (Jeane)'], ['saldoConsol', 'Saldo (medição atual + a medir)'], ['pp', '% medido'], ['perm', 'Permanência']].map(([k, rotulo]) => ({ k, rotulo })) },
+    { titulo: 'Medições consolidadas', itens: mesesConcl.map((mes) => ({ k: `c_${mes}`, rotulo: mesTxt(mes) })) },
+    { titulo: 'Medição atual', itens: [{ k: 'bat', rotulo: 'Medição atual (sem assinatura da Jeane)' }] },
+    { titulo: 'A medir', itens: [{ k: 'tot', rotulo: 'A medir (total)' }, ...mesesPrev.map((mes) => ({ k: `f_${mes}`, rotulo: `${mesTxt(mes)} · a medir` }))] },
+    { titulo: 'Situação', itens: [{ k: 'si', rotulo: 'Situação' }] },
+  ], { limite3m });
 
   const proxPag = [...new Set(linhas.flatMap((l) => l.meds.filter((m) => num(m.valor)).map((m) => pagMes(m))))].filter(Boolean).sort()[0] || null;
   const kpis = h('div', { class: 'ctc-grid ctc-grid--4' },
@@ -10037,8 +10112,7 @@ function paginaPrevisao() {
     }),
     kpis,
     h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, 'A medir — por contrato'), segOrig.elemento,
-      criarBotao({ texto: ocultarConcl ? 'Mostrar concluídas' : 'Ocultar concluídas', icone: ocultarConcl ? 'seta-baixo' : 'seta-cima', variante: 'outline', tamanho: 'sm', onClick: () => { ocultarConcl = !ocultarConcl; redesenhar(); } }),
-      criarBotao({ texto: ocultar3m ? 'Mostrar todos os meses' : 'Ocultar após 3 meses', icone: ocultar3m ? 'seta-baixo' : 'seta-cima', variante: 'outline', tamanho: 'sm', titulo: `Mostra só até ${mesTxt(limite3m)} (mês atual + 3)`, onClick: () => { ocultar3m = !ocultar3m; try { localStorage.setItem('prev.ocultar3m', ocultar3m ? '1' : '0'); } catch (e) { /* sem armazenamento */ } redesenhar(); } }),
+      seletorCols,
       editavel ? criarBotao({ texto: 'Importar cronograma', icone: 'calendario', variante: 'outline', tamanho: 'sm', onClick: importarCronograma }) : null,
       editavel && cronDB() ? criarBotao({ texto: 'Recalcular pelo cronograma', variante: 'outline', tamanho: 'sm', onClick: () => { const { n } = recalcularCron(); alterou(); toast.sucesso('Previsões recalculadas', `${n} contrato(s) vinculado(s) ao cronograma.`); } }) : null,
       editavel ? criarBotao({ texto: 'Períodos padrão', icone: 'calendario', variante: 'outline', tamanho: 'sm', onClick: abrirPeriodosPadrao }) : null,
@@ -10942,7 +11016,7 @@ function abrirAplicativo({ perfil, usuario, base, nomeArquivo }) {
           itens: [{ id: ID_MENU_CONTROLADOR, texto: 'Controlador', emoji: '🛠️' }],
         },
       ],
-      rodape: 'Controle de Medição v2.6.3 · CTC App Standard v1.9',
+      rodape: 'Controle de Medição v2.6.4 · CTC App Standard v1.9',
     },
     paginas: {
       painel: {
@@ -11005,7 +11079,7 @@ const telaEntrada = criarTelaEntrada({
   armazenamento,
   criarBaseNova,
   textoBaseInicial: 'Nenhum arquivo carregado ainda: será usada a base de demonstração com dados fictícios.',
-  rodape: 'Controle de Medição v2.6.3 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
+  rodape: 'Controle de Medição v2.6.4 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
   nomeControle: NOME_CONTROLE_KZ,
   onLoginPortal: async () => { await garantirLoginKZ(); return true; },
   rotuloImportar: '1. Importar dados da obra',
