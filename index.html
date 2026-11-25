@@ -6734,7 +6734,7 @@ function mostrarCarregamento(tipo, sub = '', { logo, rodape = '', titulo, etapas
 /* ===== app.js ===== */
 /* =============================================================================
    Controle de Medição de Fornecedores — app.js
-   Versao: 2.4.0  (Rev37 no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador; v2.3: nuvem em pacotes; v2.4: Controlador no menu, Admin renomeia/exclui salvamentos)
+   Versao: 2.5.0  (Rev37 no CTC App Standard v1.7.0; v2.1: login do Portal KZ; v2.2: sem senha do administrador; v2.3: nuvem em pacotes; v2.4: Controlador no menu, Admin renomeia/exclui salvamentos; v2.5: Previsão pelo cronograma P6, contratos fora do controle, BM atual pelas assinaturas)
    Consórcio Santa Dulce · Setor de medição
 
    Todas as telas da Rev37: Painel (precisa de ação + visão financeira),
@@ -9819,6 +9819,7 @@ function abaImportarRev37() {
 const prevDB = () => { S.previsao = S.previsao || { itens: [] }; S.previsao.itens = S.previsao.itens || []; return S.previsao; };
 const prevDe = (cid) => prevDB().itens.find((p) => p.ctId === cid) || null;
 let visaoPrev = 'pag';
+let filtroOrigem = 'todos';
 let ocultarConcl = false;
 const mesMed = (m) => String(m.envioAss || m.data || m.fim || m.ini || '').slice(0, 7);
 const padraoPrev = () => { const P = prevDB(); P.padrao = { mesBase: hojeISO().slice(0, 7), diaIni: 26, diaFim: 25, ...(P.padrao || {}) }; return P.padrao; };
@@ -9833,15 +9834,42 @@ function periodoPadrao(k) { const pd = padraoPrev(); const ini = dataDia(somaMes
 .prev-bm--atual{background:#e0f2fe;border:1.5px solid #0284c7;color:#0c4a6e}
 .prev-bm--atual b{color:#075985}
 .prev-bm--falta{background:#fff7ed;border:1px dashed #f97316;color:#9a3412}
+.prev-bm--prev{background:#f1f6fb;border:1px solid #cfe0ef}
 .prev-tag{display:inline-block;font-size:10px;font-weight:700;padding:0 5px;border-radius:8px;background:#0284c7;color:#fff;margin-left:4px;vertical-align:1px}
 .prev-col-concl{background:rgba(148,163,184,.06)}
+.prev-scroll-topo{overflow-x:auto;overflow-y:hidden;height:16px;scrollbar-width:auto;scrollbar-color:#94a3b8 #f1f5f9}
+.prev-scroll-topo>div{height:1px}
+.prev-rolagem .ctc-table-wrap{scrollbar-width:auto;scrollbar-color:#94a3b8 #f1f5f9}
+.prev-rolagem .ctc-table-wrap::-webkit-scrollbar,.prev-scroll-topo::-webkit-scrollbar{height:14px;width:12px}
+.prev-rolagem .ctc-table-wrap::-webkit-scrollbar-thumb,.prev-scroll-topo::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:7px;border:3px solid #f1f5f9}
+.prev-rolagem .ctc-table-wrap::-webkit-scrollbar-track,.prev-scroll-topo::-webkit-scrollbar-track{background:#f1f5f9}
 `));
 })();
+/** Barra de rolagem horizontal extra no topo da tabela, sincronizada com a de baixo. */
+function comBarraTopo(painel) {
+  const wrap = painel.querySelector('.ctc-table-wrap'); if (!wrap) return painel;
+  painel.classList.add('prev-rolagem');
+  const fant = h('div', {}); const barra = h('div', { class: 'prev-scroll-topo', title: 'Rolar para os lados' }, fant);
+  const sync = () => { fant.style.width = `${wrap.scrollWidth}px`; barra.style.display = wrap.scrollWidth > wrap.clientWidth + 1 ? '' : 'none'; };
+  barra.addEventListener('scroll', () => { if (wrap.scrollLeft !== barra.scrollLeft) wrap.scrollLeft = barra.scrollLeft; });
+  wrap.addEventListener('scroll', () => { if (fant.style.width !== `${wrap.scrollWidth}px`) sync(); if (barra.scrollLeft !== wrap.scrollLeft) barra.scrollLeft = wrap.scrollLeft; });
+  barra.addEventListener('pointerenter', sync); wrap.addEventListener('pointerenter', sync);
+  if (window.ResizeObserver) { const ro = new ResizeObserver(sync); ro.observe(wrap); if (wrap.firstElementChild) ro.observe(wrap.firstElementChild); }
+  wrap.parentNode.insertBefore(barra, wrap); [0, 300, 1200].forEach((ms) => setTimeout(sync, ms));
+  return painel;
+}
+/* Consolidada = assinada pela Jeane (Financeiro); se o Financeiro estiver fora do fluxo, quando todo o fluxo ligado já assinou. */
+const pendentesAss = (m) => ordemDe(m).filter((x) => x.on && !m[x.k]).map((x) => x.k);
+const medConsolidada = (m) => Boolean(m.assFin) || (Boolean(m.envioAss) && foraDoFluxo(m, 'assFin') && !pendentesAss(m).length);
 function cardBM(m, atual) {
-  return h('div', { class: atual ? 'prev-bm prev-bm--atual' : 'prev-bm prev-bm--concl', title: m.ini && m.fim ? `Período ${dt(m.ini)} a ${dt(m.fim)}` : 'Período não informado' },
-    h('div', {}, h('b', {}, `BM ${m.numero}`), ` · ${mesTxt(mesMed(m))}`, atual ? h('span', { class: 'prev-tag' }, 'ATUAL') : null),
+  const pend = atual ? pendentesAss(m).filter((k) => k !== 'assFin') : [];
+  const sub = !atual
+    ? (m.assFin ? `Jeane ${dt(String(m.assFin).slice(0, 10))}` : 'consolidada')
+    : (!m.envioAss ? 'sem envio p/ assinatura' : (pend.length ? `aguardando: ${pend.map(siglaOrd).join(', ')} → Jeane` : 'com a Jeane'));
+  return h('div', { class: atual ? 'prev-bm prev-bm--atual' : 'prev-bm prev-bm--concl', title: (m.ini && m.fim ? `Período ${dt(m.ini)} a ${dt(m.fim)}` : 'Período não informado') + (pend.length ? `\nAguardando: ${pend.map(nomeSetor).join(', ')} → Financeiro (Jeane)` : '') },
+    h('div', {}, h('b', {}, `BM ${m.numero}`), ` · ${mesTxt(mesMed(m))}`),
     h('div', { class: 'ctc-num' }, moeda(medTotal(m))),
-    h('div', { style: { fontSize: '11px' } }, m.envioAss ? `assinatura ${dt(String(m.envioAss).slice(0, 10))}` : 'sem envio p/ assinatura'));
+    h('div', { style: { fontSize: '11px', whiteSpace: 'normal' } }, sub));
 }
 const mesTxt = (c) => { if (!c) return '—'; const [a, mm] = c.split('-'); return `${NOMES_MESES[+mm - 1].slice(0, 3)}/${a.slice(2)}`; };
 const somaMes = (iso, n) => { const [a, mm] = iso.split('-').map(Number); const d = new Date(a, mm - 1 + n, 1); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}`; };
@@ -9864,41 +9892,90 @@ function celulaMed(m) {
     m.cond ? h('span', { title: m.cond }, criarBadge({ texto: 'condicionado', variante: 'warning' })) : null);
 }
 
+function construirLinhasPrev() {
+  const mesAtual = hojeISO().slice(0, 7);
+  const doControle = S.contratos.map((c) => {
+    const r = ctResumo(c); const p = prevDe(c.id); const si = situacaoPrev(c, p);
+    const ms = ordemMed(c.id);
+    const atuais = ms.filter((x) => !medConsolidada(x)); const concl = ms.filter((x) => medConsolidada(x));
+    const emAss = r2(atuais.reduce((s2, x) => s2 + medTotal(x), 0));
+    return {
+      emAss, saldoConsol: r2(r.saldo + emAss), medConsol: r2(r.medido - emAss),
+      key: 'c' + c.id, origem: 'controle', c, p, si, lb: c.fornecedor,
+      contratado: r.contratado, globalNum: r.contratado, globalTxt: moeda(r.contratado), globalEst: false, valorTxt: '',
+      medido: r.medido, saldo: r.saldo, pp: r.contratado ? (r.medido / r.contratado) * 100 : 0,
+      perm: p ? `${dt(p.permIni)} a ${dt(p.permFim)}` : '—', permVenc: !!(p && p.permFim && p.permFim < hojeISO()),
+      meds: p ? p.meds : [], atuais, concl,
+      bat: atuais.reduce((s2, x) => s2 + medTotal(x), 0), bc: concl.reduce((s2, x) => s2 + medTotal(x), 0),
+      tot: somaPrev(p), metodo: p ? p.metodo : '',
+    };
+  });
+  const foraControle = novosDB().itens.map((it, i) => {
+    const g = num(it.valor) || 0; const meds = it.meds || []; const est = meds[0] ? num(meds[0].valor) : 0;
+    return {
+      key: 'n' + i, origem: 'fora', it, idx: i, si: { t: VAR_STATUS[it.status] || 'warning', txt: TXT_STATUS[it.status] || it.status },
+      lb: it.fornecedor, contratado: g, globalNum: g, globalEst: !g, estMes: est,
+      globalTxt: g ? moeda(g) : (est ? `~${moeda(est)}/mês` : '—'), valorTxt: it.valorTxt || '',
+      medido: 0, saldo: g, emAss: 0, saldoConsol: g, medConsol: 0, pp: null, perm: it.prazo || '—', permVenc: false, meds, atuais: [], concl: [],
+      bat: 0, bc: 0, tot: meds.reduce((s2, m) => s2 + num(m.valor), 0), metodo: `Fora do controle · ${TXT_STATUS[it.status] || it.status}`,
+    };
+  });
+  const tudo = [...doControle, ...foraControle];
+  tudo.forEach((l) => { l.chave = chavePrev(l); l.excl = prevExcl().includes(l.chave); });
+  const todas = tudo.filter((l) => !l.excl); const removidas = tudo.filter((l) => l.excl);
+  const mesesPrevAll = [...new Set(todas.flatMap((l) => l.meds.map((x) => x.comp)))].filter(Boolean).sort();
+  todas.forEach((l) => {
+    if (l.contratado > 0) { let sal = l.saldo; l.saldoFut = {}; mesesPrevAll.forEach((mes) => { sal = r2(sal - l.meds.filter((m) => m.comp === mes).reduce((a, m) => a + num(m.valor), 0)); if (sal < 0 && sal > -1) sal = 0; l.saldoFut[mes] = sal; }); }
+  });
+  return { doControle: doControle.filter((l) => !l.excl), foraControle: foraControle.filter((l) => !l.excl), todas, removidas, mesAtual, mesesPrevAll };
+}
+
+/* Empresas removidas da previsão: S.previsao.excluidos = ['c:<idContrato>' | 'n:<fornecedor>'] */
+const prevExcl = () => { const P = prevDB(); P.excluidos = Array.isArray(P.excluidos) ? P.excluidos : []; return P.excluidos; };
+const chavePrev = (l) => (l.origem === 'controle' ? `c:${l.c.id}` : `n:${norm(l.it.fornecedor)}`);
+const prevExcluidoCt = (c) => prevExcl().includes(`c:${c.id}`);
+const prevExcluidoNovo = (it) => prevExcl().includes(`n:${norm(it.fornecedor)}`);
+function removerDaPrevisao(l) {
+  criarModal({
+    titulo: 'Remover da previsão', tamanho: 'sm', destruirAoFechar: true,
+    conteudo: h('p', {}, `${l.lb} sai da previsão de medição: fluxo de caixa, totais, KPIs e exportações. Os contratos, as medições e a base de cálculo continuam guardados, e dá para trazer a empresa de volta em "Empresas fora da previsão".`),
+    acoes: [{ texto: 'Cancelar', variante: 'ghost' }, {
+      texto: 'Remover', variante: 'primary',
+      onClick: () => { if (!prevExcl().includes(l.chave)) prevExcl().push(l.chave); alterou(); toast.sucesso('Removida da previsão', l.lb); return true; },
+    }],
+  }).abrir();
+}
+function voltarParaPrevisao(l) {
+  const P = prevDB(); P.excluidos = prevExcl().filter((k) => k !== l.chave); alterou(); toast.sucesso('De volta à previsão', l.lb);
+}
+
 function paginaPrevisao() {
   const P = prevDB();
   const editavel = sessao.obter().perfil !== 'visualizador';
-  const linhas = S.contratos.map((c) => {
-    const r = ctResumo(c); const p = prevDe(c.id); const m = p ? p.meds : [];
-    const si = situacaoPrev(c, p);
-    const ms = ordemMed(c.id); const mesAt = hojeISO().slice(0, 7);
-    const atuais = ms.filter((x) => mesMed(x) === mesAt); const concl = ms.filter((x) => mesMed(x) !== mesAt);
-    return {
-      c, p, si, lb: `${numCt(c)} – ${c.fornecedor}`, contratado: r.contratado, medido: r.medido, saldo: r.saldo,
-      pp: r.contratado ? (r.medido / r.contratado) * 100 : 0,
-      perm: p ? `${dt(p.permIni)} a ${dt(p.permFim)}` : '—',
-      atuais, concl, bat: atuais.reduce((s2, x) => s2 + medTotal(x), 0), bc: concl.reduce((s2, x) => s2 + medTotal(x), 0), tot: somaPrev(p),
-      apos: r2(r.saldo - somaPrev(p, true)),
-    };
-  });
-  const mesAtual = hojeISO().slice(0, 7);
+  const { doControle, foraControle, todas, removidas, mesAtual } = construirLinhasPrev();
+  const linhas = todas.filter((l) => filtroOrigem === 'todos' || l.origem === filtroOrigem);
+
   const mesesConcl = [...new Set(linhas.flatMap((l) => l.concl.map(mesMed)))].filter(Boolean).sort();
-  const mesesPrev = [...new Set(linhas.flatMap((l) => (l.p ? l.p.meds.map((x) => x.comp) : [])))].filter(Boolean).sort();
+  const mesesPrev = [...new Set(linhas.flatMap((l) => l.meds.map((x) => x.comp)))].filter(Boolean).sort();
   linhas.forEach((l) => {
     mesesConcl.forEach((mes) => { l[`c_${mes}`] = r2(l.concl.filter((x) => mesMed(x) === mes).reduce((s2, x) => s2 + medTotal(x), 0)); });
-    mesesPrev.forEach((mes) => { l[`f_${mes}`] = r2((l.p ? l.p.meds : []).filter((x) => x.comp === mes).reduce((s2, x) => s2 + num(x.valor), 0)); });
+    mesesPrev.forEach((mes) => { l[`f_${mes}`] = r2(l.meds.filter((x) => x.comp === mes).reduce((s2, x) => s2 + num(x.valor), 0)); });
   });
-  const zero = (concl) => h('div', { class: concl ? 'prev-bm prev-bm--concl' : 'ctc-text-muted' }, h('div', { class: 'ctc-num' }, moeda(0)), concl ? h('div', { style: { fontSize: '11px' } }, 'sem BM') : null);
-  const T = linhas.reduce((a, l) => ({ saldo: a.saldo + l.saldo, tot: a.tot + l.tot, cond: a.cond + (l.p ? l.p.meds.filter((m) => m.cond).reduce((s, m) => s + num(m.valor), 0) : 0) }), { saldo: 0, tot: 0, cond: 0 });
+  const zero = (concl) => h('div', { class: concl ? 'prev-bm prev-bm--concl' : 'ctc-text-muted' }, h('div', { class: 'ctc-num' }, '—'));
+  const celValorGlobal = (l) => (l.globalEst
+    ? h('div', { title: l.valorTxt || '' }, criarBadge({ texto: 'por unidade', variante: 'info' }), h('div', { class: 'ctc-text-xs ctc-text-muted' }, l.globalTxt + ' (est.)'))
+    : h('b', {}, l.globalTxt));
+  const T = linhas.reduce((a, l) => ({ saldo: a.saldo + (l.saldo || 0), tot: a.tot + l.tot, cond: a.cond + l.meds.filter((m) => m.cond).reduce((s, m) => s + num(m.valor), 0), global: a.global + (l.globalNum || 0) }), { saldo: 0, tot: 0, cond: 0, global: 0 });
+  const nC = linhas.filter((l) => l.origem === 'controle').length; const nF = linhas.filter((l) => l.origem === 'fora').length;
   const alertas = linhas.filter((l) => l.si.t === 'danger' || l.si.t === 'warning').length;
 
-  /* fluxo de caixa: contratos × meses (pagamento ou competência) */
   const chave = visaoPrev === 'pag' ? 'pag' : 'comp';
-  const meses = [...new Set(linhas.flatMap((l) => (l.p ? l.p.meds.filter((m) => num(m.valor)).map((m) => m[chave]) : [])))].filter(Boolean).sort();
-  const porMes = (l, mes) => (l.p ? l.p.meds.filter((m) => m[chave] === mes).reduce((s, m) => s + num(m.valor), 0) : 0);
-  const linhasFluxo = linhas.filter((l) => l.tot).map((l) => { const o = { lb: l.lb, total: l.tot, c: l.c }; meses.forEach((mes) => { o[mes] = porMes(l, mes); }); return o; });
+  const meses = [...new Set(linhas.flatMap((l) => l.meds.filter((m) => num(m.valor)).map((m) => m[chave])))].filter(Boolean).sort();
+  const porMes = (l, mes) => l.meds.filter((m) => m[chave] === mes).reduce((s, m) => s + num(m.valor), 0);
+  const linhasFluxo = linhas.filter((l) => l.tot).map((l) => { const o = { lb: l.lb, total: l.tot, l }; meses.forEach((mes) => { o[mes] = porMes(l, mes); }); return o; });
   const tabFluxo = criarTabela({
     dados: linhasFluxo, compacta: true, altura: 'auto', porPagina: 0, listrada: true,
-    onLinhaClick: (l) => abrirBasePrev(l.c),
+    onLinhaClick: (o) => abrirBaseUnif(o.l),
     colunas: [
       { campo: 'lb', titulo: 'Contrato', fixa: true },
       ...meses.map((mes) => ({ campo: mes, titulo: mesTxt(mes), tipo: 'moeda', total: 'soma', formatar: (v) => (v ? moeda(v) : '—') })),
@@ -9906,85 +9983,204 @@ function paginaPrevisao() {
     ],
   });
   const seg = criarSegmentado({ opcoes: [{ valor: 'pag', texto: 'Mês de pagamento' }, { valor: 'comp', texto: 'Mês de competência (medição)' }], valor: visaoPrev, onMudar: (v) => { visaoPrev = v; redesenhar(); } });
+  const segOrig = criarSegmentado({ opcoes: [{ valor: 'todos', texto: `Todos (${todas.length})` }, { valor: 'controle', texto: `Com medição (${doControle.length})` }, { valor: 'fora', texto: `Fora do controle (${foraControle.length})` }], valor: filtroOrigem, onMudar: (v) => { filtroOrigem = v; redesenhar(); } });
+
+  const ddmm = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : '');
+  const celAmedir = (l, mes) => {
+    const m = l.meds.find((x) => x.comp === mes);
+    if (!m) return zero(false);
+    return h('div', { class: m.cond ? 'prev-bm prev-bm--falta' : 'prev-bm prev-bm--prev', title: m.memoria || '' },
+      h('div', { class: 'ctc-num' }, moeda(num(m.valor))),
+      h('div', { style: { fontSize: '11px' } }, `${ddmm(m.ini)}–${ddmm(m.fim)}`),
+      m.cond ? h('div', { style: { fontSize: '10px', fontWeight: 700 } }, 'condicionado') : null,
+      (l.saldoFut && l.saldoFut[mes] != null) ? (() => { const sf = Math.max(0, r2(l.saldoFut[mes])); return h('div', { class: 'ctc-text-xs', style: { marginTop: '2px', color: '#64748b' } }, `saldo: ${moeda(sf)}`); })() : null);
+  };
 
   const tabela = criarTabela({
-    dados: linhas, porPagina: 0, listrada: true, altura: 'auto', camposBusca: ['lb'],
+    dados: linhas, porPagina: 0, listrada: true, altura: 'full', camposBusca: ['lb'],
     linhaVariante: (l) => (l.si.t === 'danger' ? 'danger' : null),
     colunas: [
-      { campo: 'lb', titulo: 'Contrato', fixa: true, render: (v, l) => h('div', {}, h('b', {}, v), l.p ? h('div', { class: 'ctc-text-xs ctc-text-muted' }, l.p.metodo || '') : null) },
-      { campo: 'contratado', titulo: 'Valor total', tipo: 'moeda', total: 'soma' },
-      { campo: 'medido', titulo: 'Acumulado atual', tipo: 'moeda', total: 'soma' },
-      { campo: 'saldo', titulo: 'Saldo', tipo: 'moeda', total: 'soma' },
-      { campo: 'pp', titulo: '% medido', tipo: 'percentual', casas: 1 },
-      { campo: 'perm', titulo: 'Permanência', render: (v, l) => h('div', { class: 'ctc-text-sm' }, v, l.p && l.p.permFim && l.p.permFim < hojeISO() ? h('div', {}, criarBadge({ texto: 'prazo vencido', variante: 'danger' })) : null) },
+      { campo: 'lb', titulo: 'Contrato', fixa: true, render: (v, l) => h('div', {}, h('b', {}, v), h('div', { class: 'ctc-text-xs ctc-text-muted' }, l.metodo || '')) },
+      { campo: 'globalNum', titulo: 'Valor do contrato', tipo: 'moeda', total: 'soma', render: (_, l) => celValorGlobal(l) },
+      { campo: 'medConsol', titulo: 'Acumulado consolidado (Jeane)', tipo: 'moeda', total: 'soma', render: (v, l) => (l.origem === 'controle' ? moeda(v) : h('span', { class: 'ctc-text-muted' }, '—')) },
+      { campo: 'saldoConsol', titulo: 'Saldo (medição atual + a medir)', tipo: 'moeda', total: 'soma', render: (v, l) => (!l.contratado ? h('span', { class: 'ctc-text-muted' }, '—')
+        : (l.emAss ? h('div', {}, h('b', { class: 'ctc-num' }, moeda(v)), h('div', { class: 'ctc-text-xs ctc-text-muted', style: { whiteSpace: 'nowrap' } }, `medição atual ${moeda(l.emAss)}`), h('div', { class: 'ctc-text-xs ctc-text-muted', style: { whiteSpace: 'nowrap' } }, `+ a medir ${moeda(l.saldo)}`))
+          : moeda(v))) },
+      { campo: 'pp', titulo: '% medido', render: (_, l) => (l.pp == null ? h('span', { class: 'ctc-text-muted' }, '—') : pct(l.pp)) },
+      { campo: 'perm', titulo: 'Permanência', render: (v, l) => h('div', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, v) },
       ...(ocultarConcl ? [] : mesesConcl.map((mes) => ({ campo: `c_${mes}`, titulo: mesTxt(mes), tipo: 'moeda', total: 'soma', classe: 'prev-col-concl',
-        render: (_, l) => { const bs = l.concl.filter((x) => mesMed(x) === mes); return bs.length ? h('div', {}, bs.map((x) => cardBM(x, false))) : zero(true); } }))),
-      { campo: 'bat', titulo: `Medição atual (${mesTxt(mesAtual)})`, tipo: 'moeda', total: 'soma', render: (_, l) => (l.atuais.length ? h('div', {}, l.atuais.map((x) => cardBM(x, true))) : h('div', { class: 'prev-bm prev-bm--falta' }, 'Sem BM enviado', h('br'), `para assinatura em ${mesTxt(hojeISO().slice(0, 7))}`)) },
-      ...mesesPrev.map((mes) => ({ campo: `f_${mes}`, titulo: `${mesTxt(mes)} (previsto)`, tipo: 'moeda', total: 'soma',
-        render: (_, l) => { const ms2 = (l.p ? l.p.meds : []).filter((x) => x.comp === mes); return ms2.length ? h('div', {}, ms2.map(celulaMed)) : zero(false); } })),
-      { campo: 'apos', titulo: 'Saldo após as 3', tipo: 'moeda', total: 'soma', render: (v) => h('span', { class: v < -0.009 ? 'ctc-text-danger' : null }, moeda(v)) },
+        render: (_, l) => { if (l.origem !== 'controle') return h('span', { class: 'ctc-text-muted' }, '—'); const bs = l.concl.filter((x) => mesMed(x) === mes); return bs.length ? h('div', {}, bs.map((x) => cardBM(x, false))) : zero(true); } }))),
+      { campo: 'bat', titulo: 'Medição atual (sem assinatura da Jeane)', tipo: 'moeda', total: 'soma',
+        render: (_, l) => { if (l.origem !== 'controle' || !l.atuais.length) return h('span', { class: 'ctc-text-muted' }, '—'); return h('div', {}, l.atuais.map((x) => cardBM(x, true))); } },
+      { campo: 'tot', titulo: 'A medir (total)', tipo: 'moeda', total: 'soma', render: (_, l) => h('b', {}, moeda(l.tot)) },
+      ...mesesPrev.map((mes) => ({ campo: `f_${mes}`, titulo: `${mesTxt(mes)} · a medir`, tipo: 'moeda', total: 'soma', render: (_, l) => celAmedir(l, mes) })),
       { campo: 'si', titulo: 'Situação', ordenavel: false, render: (v) => criarBadge({ texto: v.txt, variante: v.t }) },
       {
         campo: 'acoes', titulo: '', ordenavel: false, classe: 'ctc-col--actions',
         render: (_, l) => h('div', { class: 'ctc-btn-group' },
-          criarBotao({ texto: 'Base de cálculo', variante: 'ghost', tamanho: 'sm', onClick: () => abrirBasePrev(l.c) }),
-          editavel ? criarBotao({ icone: 'editar', variante: 'ghost', tamanho: 'sm', titulo: `Editar previsão ${l.lb}`, onClick: () => editarPrev(l.c) }) : null),
+          criarBotao({ texto: 'Base de cálculo', variante: 'ghost', tamanho: 'sm', onClick: () => abrirBaseUnif(l) }),
+          editavel ? criarBotao({ icone: 'editar', variante: 'ghost', tamanho: 'sm', titulo: `Editar ${l.lb}`, onClick: () => (l.origem === 'controle' ? editarPrev(l.c) : editarNovo(l.idx)) }) : null,
+          editavel ? criarBotao({ icone: 'fechar', variante: 'ghost', tamanho: 'sm', titulo: `Remover ${l.lb} da previsão`, onClick: () => removerDaPrevisao(l) }) : null),
       },
     ],
   });
 
   const proxPag = meses.length ? meses[0] : null;
   const kpis = h('div', { class: 'ctc-grid ctc-grid--4' },
-    criarKpi({ rotulo: 'Saldo a medir', valor: moeda(T.saldo), sub: `${S.contratos.length} contrato(s) do controle` }).elemento,
-    criarKpi({ rotulo: 'Previsto nas 3 próximas medições', valor: moeda(T.tot), sub: `${moeda(T.cond)} condicionado a aditivo/prorrogação`, variante: 'accent', tema: 1 }).elemento,
-    criarKpi({ rotulo: proxPag ? `Pagamentos em ${mesTxt(proxPag)}` : 'Pagamentos', valor: moeda(proxPag ? linhas.reduce((s, l) => s + (l.p ? l.p.meds.filter((m) => m.pag === proxPag).reduce((x, m) => x + num(m.valor), 0) : 0), 0) : 0), sub: 'primeiro mês do fluxo, valor bruto' }).elemento,
-    criarKpi({ rotulo: 'Contratos para revisar', valor: String(alertas), sub: 'sem previsão, nova medição ou acima do saldo', destaque: alertas ? 'negative' : undefined }).elemento);
+    criarKpi({ rotulo: 'Valor dos contratos (global)', valor: moeda(T.global), sub: `${nC} com medição + ${nF} fora do controle` }).elemento,
+    criarKpi({ rotulo: 'A medir (total)', valor: moeda(T.tot), sub: `${moeda(T.cond)} condicionado (aditivo/prorrogação/minuta)`, variante: 'accent', tema: 1 }).elemento,
+    criarKpi({ rotulo: proxPag ? `Pagamentos em ${mesTxt(proxPag)}` : 'Pagamentos', valor: moeda(proxPag ? linhas.reduce((s, l) => s + l.meds.filter((m) => m.pag === proxPag).reduce((x, m) => x + num(m.valor), 0), 0) : 0), sub: 'primeiro mês do fluxo, valor bruto' }).elemento,
+    criarKpi({ rotulo: 'Saldo dos contratos (medição atual + a medir)', valor: moeda(linhas.filter((l) => l.origem === 'controle').reduce((s, l) => s + l.saldoConsol, 0)), sub: `${moeda(linhas.reduce((s, l) => s + (l.emAss || 0), 0))} em assinatura · ${alertas} contrato(s) a revisar`, destaque: alertas ? 'negative' : undefined }).elemento);
 
-  /* base de cálculo descrita, contrato a contrato */
-  const bases = linhas.map((l) => {
-    const p = l.p;
-    return h('details', { class: 'ctc-card', style: { padding: '10px 14px' } },
-      h('summary', { style: { cursor: 'pointer' } }, h('b', {}, l.lb), ' ', criarBadge({ texto: l.si.txt, variante: l.si.t }), p ? h('span', { class: 'ctc-text-sm ctc-text-muted' }, `  ·  ${p.metodo}`) : null),
-      p ? blocoBasePrev(l.c, p) : textoPequeno('Sem previsão cadastrada para este contrato.'));
-  });
+  const bases = linhas.map((l) => h('details', { class: 'ctc-card', style: { padding: '10px 14px' } },
+    h('summary', { style: { cursor: 'pointer' } }, h('b', {}, l.lb), ' ',
+      criarBadge({ texto: l.origem === 'controle' ? 'No controle' : 'Fora do controle', variante: l.origem === 'controle' ? 'success' : 'info' }), ' ',
+      criarBadge({ texto: l.si.txt, variante: l.si.t }), h('span', { class: 'ctc-text-sm ctc-text-muted' }, `  ·  ${l.metodo || ''}`)),
+    l.origem === 'controle' ? (l.p ? blocoBasePrev(l.c, l.p) : textoPequeno('Sem previsão cadastrada para este contrato.')) : blocoNovo(l.it)));
 
   return [
     alertaFicticio(),
     criarAlerta({
-      tipo: 'info', titulo: 'Como a previsão foi feita',
-      mensagem: `${P.criterio || 'Previsão das 3 próximas medições de cada contrato do controle, com base na permanência, no saldo, no valor total e no acumulado atual.'}${P.atualizado ? ` Atualizada em ${fdt(P.atualizado)}${P.por ? ` por ${P.por}` : ''}.` : ''} Acumulado e saldo são lidos do controle em tempo real; se uma medição nova for lançada, o contrato aparece como "revisar".`,
+      tipo: 'info', titulo: 'Previsão unificada — A medir',
+      mensagem: `Previsão das 3 próximas medições (A medir) de TODOS os contratos: os com medição no controle e os da pasta ainda sem medição. ${P.criterio || ''}${P.atualizado ? ` Atualizada em ${fdt(P.atualizado)}.` : ''}`,
     }),
     kpis,
     h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, 'Fluxo de caixa previsto'), seg.elemento),
-    criarPainel({ titulo: visaoPrev === 'pag' ? 'Por mês previsto de pagamento (data da medição + aprovação/NF + prazo de pagamento do contrato)' : 'Por mês de competência da medição', icone: 'moeda', semEspaco: true, conteudo: tabFluxo.elemento }).elemento,
-    h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, 'Previsão por contrato'),
-      h('span', { class: 'ctc-text-sm ctc-text-muted' }, `Mês da medição = mês do envio para assinatura. Próximas: dia ${padraoPrev().diaIni} a ${padraoPrev().diaFim}. Valores brutos.`),
-      criarBotao({ texto: ocultarConcl ? 'Mostrar medições concluídas' : 'Ocultar medições concluídas', icone: ocultarConcl ? 'seta-baixo' : 'seta-cima', variante: 'outline', tamanho: 'sm', onClick: () => { ocultarConcl = !ocultarConcl; redesenhar(); } }),
-      editavel ? criarBotao({ texto: 'Períodos padrão', icone: 'calendario', variante: 'outline', tamanho: 'sm', onClick: abrirPeriodosPadrao }) : null),
-    criarPainel({ titulo: '3 próximas medições', icone: 'tabela', semEspaco: true, conteudo: tabela.elemento }).elemento,
+    comBarraTopo(criarPainel({ titulo: visaoPrev === 'pag' ? 'Por mês previsto de pagamento' : 'Por mês de competência da medição', icone: 'moeda', semEspaco: true, conteudo: tabFluxo.elemento }).elemento),
+    h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, 'A medir — por contrato'), segOrig.elemento,
+      criarBotao({ texto: ocultarConcl ? 'Mostrar concluídas' : 'Ocultar concluídas', icone: ocultarConcl ? 'seta-baixo' : 'seta-cima', variante: 'outline', tamanho: 'sm', onClick: () => { ocultarConcl = !ocultarConcl; redesenhar(); } }),
+      editavel ? criarBotao({ texto: 'Importar cronograma', icone: 'calendario', variante: 'outline', tamanho: 'sm', onClick: importarCronograma }) : null,
+      editavel && cronDB() ? criarBotao({ texto: 'Recalcular pelo cronograma', variante: 'outline', tamanho: 'sm', onClick: () => { const { n } = recalcularCron(); alterou(); toast.sucesso('Previsões recalculadas', `${n} contrato(s) vinculado(s) ao cronograma.`); } }) : null,
+      editavel ? criarBotao({ texto: 'Períodos padrão', icone: 'calendario', variante: 'outline', tamanho: 'sm', onClick: abrirPeriodosPadrao }) : null,
+      editavel ? criarBotao({ texto: 'Add contrato fora do controle', icone: 'mais', variante: 'outline', tamanho: 'sm', onClick: () => editarNovo(null) }) : null),
+    cronDB() ? h('div', { class: 'ctc-text-sm', style: { padding: '0 2px 4px' } }, h('b', {}, 'Cronograma: '), `data date ${dt(cronDB().dataDate)} · ${cronDB().arquivo} (aba ${cronDB().aba}) · ${linhas.filter((l) => l.p && l.p.cron).length} contrato(s) com previsão pelo avanço do cronograma.`)
+      : h('div', { class: 'ctc-text-sm ctc-text-muted', style: { padding: '0 2px 4px' } }, 'Nenhum cronograma importado. Use "Importar cronograma" para prever pelo avanço do cronograma os contratos sem critério de medição.'),
+    h('div', { class: 'ctc-text-sm ctc-text-muted', style: { padding: '0 2px 6px' } }, `A medir distribuído mês a mês até o fim de cada contrato (período individual mostrado em cada célula). "saldo:" = quanto resta do contrato depois daquele BM. Valores brutos.`),
+    comBarraTopo(criarPainel({ titulo: 'A medir — 3 próximas medições', icone: 'tabela', semEspaco: true, conteudo: tabela.elemento }).elemento),
     h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, 'Base de cálculo de cada contrato')),
     h('div', { class: 'ctc-stack' }, bases),
+    removidas.length ? h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, `Empresas fora da previsão (${removidas.length})`)) : null,
+    removidas.length ? h('div', { class: 'ctc-card', style: { padding: '6px 12px' } }, removidas.map((l) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '6px 0', borderBottom: '1px solid var(--ctc-neutral-100,#f1f5f9)', opacity: 0.75 } },
+      h('div', {}, h('b', {}, l.lb), h('div', { class: 'ctc-text-xs ctc-text-muted' }, `${l.origem === 'controle' ? `No controle · ${l.metodo || 'sem previsão'}` : (l.metodo || 'Fora do controle')} · a medir ${moeda(l.tot)}`)),
+      editavel ? criarBotao({ texto: 'Voltar para a previsão', variante: 'outline', tamanho: 'sm', onClick: () => voltarParaPrevisao(l) }) : null))) : null,
   ];
+}
+
+function abrirBaseUnif(l) {
+  if (l.origem === 'controle') return abrirBasePrev(l.c);
+  return abrirNovo(l.idx);
+}
+
+/* ---- gerador mínimo de .xlsx (sem dependências) ---- */
+const _xmlEsc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const _col = (n) => { let x = ''; n += 1; while (n > 0) { n -= 1; x = String.fromCharCode(65 + (n % 26)) + x; n = Math.floor(n / 26); } return x; };
+function _crc32(buf) {
+  let c; const t = _crc32.t || (_crc32.t = (() => { const a = []; for (let n = 0; n < 256; n += 1) { c = n; for (let k = 0; k < 8; k += 1) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); a[n] = c >>> 0; } return a; })());
+  let crc = 0 ^ (-1); for (let i = 0; i < buf.length; i += 1) crc = (crc >>> 8) ^ t[(crc ^ buf[i]) & 0xFF]; return (crc ^ (-1)) >>> 0;
+}
+function _zip(files) {
+  const enc = new TextEncoder(); const parts = []; const central = []; let off = 0;
+  const u16 = (n) => [n & 0xFF, (n >>> 8) & 0xFF]; const u32 = (n) => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+  files.forEach((f) => {
+    const name = enc.encode(f.name); const data = typeof f.data === 'string' ? enc.encode(f.data) : f.data; const crc = _crc32(data);
+    const lh = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+    parts.push(new Uint8Array(lh), name, data);
+    const ch = [].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(off));
+    central.push(new Uint8Array(ch), name); off += lh.length + name.length + data.length;
+  });
+  let cs = 0; central.forEach((p2) => { cs += p2.length; }); const cstart = off;
+  const eocd = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(cs), u32(cstart), u16(0)));
+  const all = [...parts, ...central, eocd]; let tot = 0; all.forEach((a) => { tot += a.length; });
+  const out = new Uint8Array(tot); let o = 0; all.forEach((a) => { out.set(a, o); o += a.length; }); return out;
+}
+function _sheetXml(rows, cols) {
+  let o = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  if (cols) { o += '<cols>'; cols.forEach((w, i) => { o += `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`; }); o += '</cols>'; }
+  o += '<sheetData>';
+  rows.forEach((row, ri) => {
+    o += `<row r="${ri + 1}">`;
+    row.forEach((c, ci) => {
+      if (c == null) return; const ref = _col(ci) + (ri + 1); const st = c.s ? ` s="${c.s}"` : '';
+      if (c.t === 'n') o += `<c r="${ref}"${st}><v>${c.v}</v></c>`;
+      else o += `<c r="${ref}" t="inlineStr"${st}><is><t xml:space="preserve">${_xmlEsc(c.v)}</t></is></c>`;
+    });
+    o += '</row>';
+  });
+  return o + '</sheetData></worksheet>';
+}
+function _xlsx(sheets) {
+  const styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + '<numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;R$&quot;\\ #,##0.00"/></numFmts>'
+    + '<fonts count="3"><font><sz val="10"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="10"/><name val="Calibri"/></font></fonts>'
+    + '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F2744"/></patternFill></fill></fills>'
+    + '<borders count="2"><border/><border><left style="thin"><color rgb="FFE2E8F0"/></left><right style="thin"><color rgb="FFE2E8F0"/></right><top style="thin"><color rgb="FFE2E8F0"/></top><bottom style="thin"><color rgb="FFE2E8F0"/></bottom></border></borders>'
+    + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    + '<cellXfs count="5">'
+    + '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    + '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf>'
+    + '<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>'
+    + '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment wrapText="1"/></xf>'
+    + '<xf numFmtId="164" fontId="2" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>'
+    + '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  const files = [
+    { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' + sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+    { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + sheets.map((sh, i) => `<sheet name="${_xmlEsc(sh.nome)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets></workbook>' },
+    { name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') + `<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: 'xl/styles.xml', data: styles },
+  ];
+  sheets.forEach((sh, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: _sheetXml(sh.rows, sh.cols) }));
+  return _zip(files);
+}
+
+function exportarAMedirXlsx() {
+  const { todas, mesAtual, mesesPrevAll } = construirLinhasPrev();
+  const H = (v) => ({ t: 's', v, s: 1 }); const Tx = (v) => ({ t: 's', v, s: 3 }); const M = (v) => ({ t: 'n', v: r2(v), s: 2 }); const Mt = (v) => ({ t: 'n', v: r2(v), s: 4 });
+  // Aba 1 – resumo (matriz contrato x mês)
+  const cab1 = [H('Contrato'), H('Origem'), H('Valor do contrato'), H('Acumulado consolidado (Jeane)'), H('Saldo (medição atual + a medir)'), H('A medir (total)'), ...mesesPrevAll.map((m) => H(mesTxt(m))), H('Situação')];
+  const rows1 = [cab1];
+  todas.forEach((l) => {
+    const r = [Tx(l.lb), Tx(l.origem === 'controle' ? 'No controle' : 'Fora do controle'),
+      l.globalNum ? M(l.globalNum) : Tx(l.globalTxt + (l.globalEst ? ' (est.)' : '')),
+      l.origem === 'controle' ? M(l.medConsol) : Tx('—'), l.contratado ? M(l.saldoConsol) : Tx('—'), Mt(l.tot)];
+    mesesPrevAll.forEach((mes) => { const v = l.meds.filter((x) => x.comp === mes).reduce((s2, x) => s2 + num(x.valor), 0); r.push(l.meds.some((x) => x.comp === mes) ? M(v) : Tx('')); });
+    r.push(Tx(l.si.txt)); rows1.push(r);
+  });
+  const totalRow = [H('TOTAL'), H(''), H(''), H(''), H(''), Mt(todas.reduce((s2, l) => s2 + l.tot, 0)), ...mesesPrevAll.map((mes) => Mt(todas.reduce((s2, l) => s2 + l.meds.filter((x) => x.comp === mes).reduce((a, x) => a + num(x.valor), 0), 0))), H('')];
+  rows1.push(totalRow);
+  const cols1 = [34, 15, 18, 15, 15, 16, ...mesesPrevAll.map(() => 14), 20];
+  // Aba 2 – cronograma período a período
+  const cab2 = [H('Contrato'), H('Origem'), H('BM'), H('Período início'), H('Período fim'), H('Competência'), H('Pagamento'), H('Valor a medir'), H('Condição'), H('Método / memória')];
+  const rows2 = [cab2];
+  todas.forEach((l) => l.meds.forEach((m) => rows2.push([Tx(l.lb), Tx(l.origem === 'controle' ? 'No controle' : 'Fora do controle'), Tx(m.num), Tx(m.ini ? dt(m.ini) : ''), Tx(m.fim ? dt(m.fim) : ''), Tx(mesTxt(m.comp)), Tx(mesTxt(m.pag)), M(num(m.valor)), Tx(m.cond || ''), Tx(m.memoria || l.metodo || '')])));
+  const cols2 = [34, 15, 6, 14, 14, 12, 12, 16, 22, 48];
+  const bytes = _xlsx([{ nome: 'A medir (resumo)', rows: rows1, cols: cols1 }, { nome: 'Cronograma', rows: rows2, cols: cols2 }]);
+  baixarArquivo(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `a-medir_previsao_${hojeISO()}.xlsx`);
 }
 
 function blocoBasePrev(c, p) {
   const r = ctResumo(c);
+  const emAss = r2(ordemMed(c.id).filter((x) => !medConsolidada(x)).reduce((s2, x) => s2 + medTotal(x), 0));
   const campo = (rot, val) => h('div', {}, h('div', { class: 'ctc-text-xs ctc-text-muted' }, rot), h('div', { class: 'ctc-text-sm' }, val || '—'));
+  const pctTxt = (v) => (r.contratado ? formatarPercentual((num(v) / r.contratado) * 100, { casas: 2 }) : '—');
   return h('div', { class: 'ctc-stack', style: { marginTop: '8px' } },
     h('div', { class: 'ctc-grid ctc-grid--4' },
-      campo('Valor total (controle)', moeda(r.contratado)), campo('Acumulado atual', moeda(r.medido)), campo('Saldo atual', moeda(r.saldo)),
+      campo('Valor total (controle)', moeda(r.contratado)), campo('Acumulado consolidado (Jeane)', moeda(r2(r.medido - emAss))), campo('Medição atual (sem assinatura da Jeane)', moeda(emAss)), campo('Saldo do contrato (medição atual + a medir)', `${moeda(r2(r.saldo + emAss))}  ·  a medir ${moeda(r.saldo)}`),
       campo('Medições lançadas (mês = envio p/ assinatura)', ordemMed(c.id).map((x) => `BM ${x.numero} · ${mesTxt(mesMed(x))} · ${moeda(medTotal(x))}`).join('  |  ') || 'Nenhuma'),
       campo('Na data da previsão', p.ref ? `acum. ${moeda(p.ref.acumulado)} · saldo ${moeda(p.ref.saldo)}` : '—')),
     campo('Permanência / prazo', p.permTxt || `${dt(p.permIni)} a ${dt(p.permFim)}`),
     campo('Prazo de pagamento', p.pagTxt || `${p.pagDias || 30} dias`),
     campo('Método', p.metodo),
     campo('Base utilizada', p.base),
-    tabelaEditavel([['BM'], ['Período'], ['Competência'], ['Pagamento'], ['Valor', 1], ['Memória de cálculo'], ['Condição']],
+    blocoCron(p),
+    tabelaEditavel([['BM'], ['Período'], ['Competência'], ['Pagamento'], ...(p.cron ? [['% avanço do mês', 1], ['% físico', 1]] : []), ['% contrato', 1], ['Valor', 1], ['Memória de cálculo'], ['Condição']],
       h('tbody', {}, p.meds.map((m) => h('tr', {},
         h('td', {}, m.num), h('td', {}, `${dt(m.ini)} a ${dt(m.fim)}`), h('td', {}, mesTxt(m.comp)), h('td', {}, mesTxt(m.pag)),
+        ...(p.cron ? [h('td', { class: 'ctc-col--num' }, m.pctCron ? `${formatarNumero(m.pctCron, 2)}%` : '—'), h('td', { class: 'ctc-col--num' }, m.pctFis ? `${formatarNumero(m.pctFis, 2)}%` : '—')] : []),
+        h('td', { class: 'ctc-col--num' }, pctTxt(m.valor)),
         h('td', { class: 'ctc-col--num' }, moeda(num(m.valor))), h('td', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, m.memoria || ''),
         h('td', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, m.cond || '')))),
-      h('tfoot', {}, h('tr', {}, h('td', { colspan: '4' }, 'Total das 3'), h('td', { class: 'ctc-col--num' }, moeda(somaPrev(p))), h('td', { colspan: '2' }, `Saldo após: ${moeda(r2(r.saldo - somaPrev(p, true)))}`)))),
+      h('tfoot', {}, h('tr', {}, h('td', { colspan: p.cron ? '6' : '4' }, 'Total previsto'), h('td', { class: 'ctc-col--num' }, pctTxt(somaPrev(p))), h('td', { class: 'ctc-col--num' }, moeda(somaPrev(p))), h('td', { colspan: '2' }, `Saldo após: ${moeda(r2(r.saldo - somaPrev(p, true)))}`)))),
     p.alerta ? criarAlerta({ tipo: 'warning', mensagem: p.alerta }) : null,
     (p.fontes || []).length ? h('div', {}, h('div', { class: 'ctc-text-xs ctc-text-muted' }, 'Documentos lidos'), h('ul', { class: 'ctc-text-xs', style: { margin: '4px 0 0 18px' } }, p.fontes.map((f) => h('li', {}, f)))) : null);
 }
@@ -9995,7 +10191,9 @@ function abrirBasePrev(c) {
     titulo: `Base de cálculo – ${numCt(c)} ${c.fornecedor}`, tamanho: 'xl', destruirAoFechar: true,
     conteudo: p ? blocoBasePrev(c, p) : h('p', {}, 'Sem previsão cadastrada para este contrato.'),
     acoes: [
-      ...(sessao.obter().perfil !== 'visualizador' ? [{ texto: 'Editar', variante: 'outline', onClick: () => { setTimeout(() => editarPrev(c), 0); } }] : []),
+      ...(sessao.obter().perfil !== 'visualizador' ? [
+        { texto: p && p.cron ? 'Vínculo com o cronograma' : 'Vincular ao cronograma', variante: 'outline', onClick: () => { setTimeout(() => editarVinculoCron(c), 0); } },
+        { texto: 'Editar', variante: 'outline', onClick: () => { setTimeout(() => editarPrev(c), 0); } }] : []),
       { texto: 'Fechar', variante: 'primary' },
     ],
   }).abrir();
@@ -10018,29 +10216,55 @@ function editarPrev(c) {
   };
   const linhasM = p.meds.map((m) => ({
     m, num: inputCelula(m.num, { largura: 50 }), ini: inp(m.ini, { type: 'date' }), fim: inp(m.fim, { type: 'date' }),
-    comp: inp(m.comp, { type: 'month' }), pag: inp(m.pag, { type: 'month' }), valor: inputCelula(formatarNumero(num(m.valor), 2), { numero: true }),
+    comp: inp(m.comp, { type: 'month' }), pag: inp(m.pag, { type: 'month' }), valor: inputCelula(formatarNumero(num(m.valor), 2), { numero: true, style: { minWidth: '120px' } }),
+    pct: inputCelula(r.contratado && num(m.valor) ? formatarNumero((num(m.valor) / r.contratado) * 100, 2) : '', { numero: true, placeholder: '%', title: '% do valor do contrato', style: { minWidth: '70px', width: '70px' } }),
     memoria: inp(m.memoria), cond: inp(m.cond),
   }));
+  // % do contrato <-> valor: digitar um atualiza o outro
+  const totPrev = h('span', { class: 'ctc-text-sm' });
+  const atualizarTot = () => {
+    const tv = r2(linhasM.reduce((s2, l) => s2 + num(l.valor.value), 0));
+    const tp = r.contratado ? (tv / r.contratado) * 100 : 0;
+    totPrev.textContent = `Total previsto: ${formatarNumero(tp, 2)}% do contrato · ${moeda(tv)} · saldo após: ${moeda(r2(r.saldo - tv))}`;
+    totPrev.style.color = tv > r.saldo + 0.01 ? 'var(--ctc-danger, #b91c1c)' : '';
+  };
+  linhasM.forEach((l) => {
+    l.pct.addEventListener('input', () => {
+      if (!r.contratado || l.pct.value.trim() === '') return;
+      const pv = num(l.pct.value); const v = r2((r.contratado * pv) / 100);
+      l.valor.value = formatarMoeda(v, { simbolo: false });
+      l.memoria.value = `${formatarNumero(pv, 2)}% × ${moeda(r.contratado)} = ${moeda(v)}`;
+      atualizarTot();
+    });
+    l.valor.addEventListener('input', () => {
+      l.pct.value = r.contratado && num(l.valor.value) ? formatarNumero((num(l.valor.value) / r.contratado) * 100, 2) : '';
+      atualizarTot();
+    });
+  });
+  atualizarTot();
   function sugerir() {
     const fim = f.permFim.value;
     if (!fim) { msg.mostrar('Informe o fim da permanência para sugerir o rateio.'); return; }
     const ini0 = linhasM[0].ini.value || hojeISO();
     const mesesRest = Math.max(1, (Number(fim.slice(0, 4)) - Number(ini0.slice(0, 4))) * 12 + Number(fim.slice(5, 7)) - Number(ini0.slice(5, 7)) + 1);
     const v = r2(r.saldo / mesesRest); let resto = r.saldo;
-    linhasM.forEach((l) => { const x = Math.min(v, Math.max(0, resto)); resto = r2(resto - x); l.valor.value = formatarMoeda(x, { simbolo: false }); l.memoria.value = `Saldo ${moeda(r.saldo)} ÷ ${mesesRest} mês(es) até ${dt(fim)} = ${moeda(v)}`; });
+    linhasM.forEach((l) => { const x = Math.min(v, Math.max(0, resto)); resto = r2(resto - x); l.valor.value = formatarMoeda(x, { simbolo: false }); l.pct.value = r.contratado && x ? formatarNumero((x / r.contratado) * 100, 2) : ''; l.memoria.value = `Saldo ${moeda(r.saldo)} ÷ ${mesesRest} mês(es) até ${dt(fim)} = ${moeda(v)}`; });
+    atualizarTot();
     f.metodo.value = 'Pró-rata do saldo pela permanência';
     msg.mostrar(`Sugerido: saldo ${moeda(r.saldo)} ÷ ${mesesRest} mês(es) restante(s). Revise e descreva a base antes de salvar.`, 'info');
   }
   const corpo = h('div', { class: 'ctc-stack' },
     msg.elemento,
     criarAlerta({ tipo: 'info', mensagem: `Valor total ${moeda(r.contratado)} · acumulado ${moeda(r.medido)} · saldo ${moeda(r.saldo)}. Descreva sempre o que foi usado como base para as medições futuras.` }),
+    p.cron ? criarAlerta({ tipo: 'warning', mensagem: 'Este contrato está vinculado ao cronograma. Ajustes manuais aqui são substituídos quando o cronograma for importado ou recalculado.' }) : null,
     h('div', { class: 'ctc-form-grid' },
       campoLivre('Método', f.metodo), campoLivre('Prazo de pagamento (dias)', f.pagDias),
       campoLivre('Início da permanência', f.permIni), campoLivre('Fim da permanência', f.permFim),
       campoLivre('Permanência / prazo (texto)', f.permTxt, true), campoLivre('Base utilizada para o cálculo', f.base, true),
       campoLivre('Alerta / pendência', f.alerta, true), campoLivre('Documentos lidos (um por linha)', f.fontes, true)),
-    tabelaEditavel([['BM'], ['Início'], ['Fim'], ['Competência'], ['Pagamento'], ['Valor', 1], ['Memória de cálculo'], ['Condição (se depende de aditivo)']],
-      h('tbody', {}, linhasM.map((l) => h('tr', {}, h('td', {}, l.num), h('td', {}, l.ini), h('td', {}, l.fim), h('td', {}, l.comp), h('td', {}, l.pag), h('td', {}, l.valor), h('td', {}, l.memoria), h('td', {}, l.cond))))));
+    tabelaEditavel([['BM'], ['Início'], ['Fim'], ['Competência'], ['Pagamento'], ['% contrato', 1], ['Valor', 1], ['Memória de cálculo'], ['Condição (se depende de aditivo)']],
+      h('tbody', {}, linhasM.map((l) => h('tr', {}, h('td', {}, l.num), h('td', {}, l.ini), h('td', {}, l.fim), h('td', {}, l.comp), h('td', {}, l.pag), h('td', {}, l.pct), h('td', {}, l.valor), h('td', {}, l.memoria), h('td', {}, l.cond))))),
+    totPrev);
   criarModal({
     titulo: `Previsão – ${numCt(c)} ${c.fornecedor}`, tamanho: 'xl', destruirAoFechar: true, conteudo: corpo,
     acoes: [
@@ -10055,7 +10279,7 @@ function editarPrev(c) {
             pagDias: Number(f.pagDias.value) || 30, base: f.base.value.trim(), alerta: f.alerta.value.trim(),
             fontes: f.fontes.value.split('\n').map((x) => x.trim()).filter(Boolean),
             ref: { contratado: r.contratado, acumulado: r.medido, saldo: r.saldo },
-            meds: linhasM.map((l) => ({ num: l.num.value.trim(), ini: l.ini.value, fim: l.fim.value, comp: l.comp.value || (l.fim.value || '').slice(0, 7), pag: l.pag.value, valor: r2(num(l.valor.value)), memoria: l.memoria.value.trim(), cond: l.cond.value.trim() })),
+            meds: linhasM.map((l) => { const v = r2(num(l.valor.value)); return { num: l.num.value.trim(), ini: l.ini.value, fim: l.fim.value, comp: l.comp.value || (l.fim.value || '').slice(0, 7), pag: l.pag.value, valor: v, pct: r.contratado ? Math.round((v / r.contratado) * 1e6) / 1e4 : null, memoria: l.memoria.value.trim(), cond: l.cond.value.trim() }; }),
             editadoEm: agoraLocal(), editadoPor: operador || 'Setor de medição',
           };
           const P = prevDB(); const i = P.itens.findIndex((x) => x.ctId === c.id);
@@ -10069,16 +10293,285 @@ function editarPrev(c) {
   }).abrir();
 }
 
+/* =============================================================================
+   11b. CRONOGRAMA (Primavera P6) — previsão pelo avanço do cronograma
+   S.cronograma = { arquivo, aba, dataDate, titulo, importadoEm, ativ: [{ n, nome, ini, fim, bud, act, rem: { 'AAAA-MM': valor } }] }
+   p.cron = { ativ: [{ nome, bud, n }], itens: { itemId: 'cron' | 'inicio' | 'fim' | 'mensal' | 'fora' } }
+   Só para contratos que não estipulam como serão medidos (produção / verba sem critério).
+   ========================================================================== */
+const cronDB = () => S.cronograma || null;
+const nX = (v) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
+const MES_ABR = { jan: 1, feb: 2, fev: 2, mar: 3, apr: 4, abr: 4, may: 5, mai: 5, jun: 6, jul: 7, aug: 8, ago: 8, sep: 9, set: 9, oct: 10, out: 10, nov: 11, dec: 12, dez: 12 };
+function cronData(v) {
+  if (v == null || v === '') return '';
+  const s = String(v).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return new Date(Date.UTC(1899, 11, 30) + Math.round(Number(s)) * 864e5).toISOString().slice(0, 10);
+  const m = s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ](\d{2,4})/);
+  if (!m || !MES_ABR[m[2].toLowerCase()]) return '';
+  return `${m[3].length === 2 ? 2000 + Number(m[3]) : m[3]}-${p2(MES_ABR[m[2].toLowerCase()])}-${p2(Number(m[1]))}`;
+}
+
+/** Leitor mínimo de .xlsx/.xlsm (zip) usando o DecompressionStream do navegador. */
+async function lerZip(buf) {
+  const dv = new DataView(buf); const u8 = new Uint8Array(buf); const dec = new TextDecoder();
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i -= 1) { if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new Error('O arquivo não é um Excel (.xlsx/.xlsm) válido.');
+  const n = dv.getUint16(eocd + 10, true); let p = dv.getUint32(eocd + 16, true); const ent = {};
+  for (let k = 0; k < n; k += 1) {
+    const met = dv.getUint16(p + 10, true); const cs = dv.getUint32(p + 20, true);
+    const ln = dv.getUint16(p + 28, true); const le = dv.getUint16(p + 30, true); const lc = dv.getUint16(p + 32, true);
+    ent[dec.decode(u8.subarray(p + 46, p + 46 + ln))] = { met, cs, off: dv.getUint32(p + 42, true) };
+    p += 46 + ln + le + lc;
+  }
+  return async (nome) => {
+    const e = ent[nome]; if (!e) return null;
+    const ini = e.off + 30 + dv.getUint16(e.off + 26, true) + dv.getUint16(e.off + 28, true);
+    const dados = u8.subarray(ini, ini + e.cs);
+    if (e.met === 0) return dec.decode(dados);
+    return new Response(new Blob([dados]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+  };
+}
+
+async function lerCronogramaXlsx(arquivo) {
+  const ler = await lerZip(await arquivo.arrayBuffer());
+  const xml = async (nome) => { const t = await ler(nome); return t ? new DOMParser().parseFromString(t, 'application/xml') : null; };
+  const wb = await xml('xl/workbook.xml'); const rels = await xml('xl/_rels/workbook.xml.rels');
+  if (!wb || !rels) throw new Error('Não consegui abrir a pasta de trabalho.');
+  const ss = []; const sx = await xml('xl/sharedStrings.xml');
+  if (sx) [...sx.getElementsByTagName('si')].forEach((si) => ss.push([...si.getElementsByTagName('t')].map((t) => t.textContent).join('')));
+  const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const abas = [...wb.getElementsByTagName('sheet')].map((s) => ({ nome: s.getAttribute('name'), rid: s.getAttributeNS(R_NS, 'id') || s.getAttribute('r:id') }));
+  const alvo = (rid) => { const r = [...rels.getElementsByTagName('Relationship')].find((x) => x.getAttribute('Id') === rid); const t = (r?.getAttribute('Target') || '').replace(/^\//, ''); return t.startsWith('xl/') ? t : `xl/${t}`; };
+  const colIdx = (ref) => { let k = 0; for (const ch of ref.replace(/\d+/g, '')) k = k * 26 + (ch.charCodeAt(0) - 64); return k - 1; };
+  const ordem = [...abas.filter((a) => a.nome === 'Planilha3'), ...abas.filter((a) => a.nome !== 'Planilha3')];
+  for (const a of ordem) {
+    const doc = await xml(alvo(a.rid)); if (!doc) continue;
+    const L = [...doc.getElementsByTagName('row')].map((r) => {
+      const lin = [];
+      [...r.getElementsByTagName('c')].forEach((c) => {
+        const t = c.getAttribute('t'); const v = c.getElementsByTagName('v')[0]; let val = v ? v.textContent : '';
+        if (t === 's') val = ss[Number(val)] ?? ''; else if (t === 'inlineStr') val = [...c.getElementsByTagName('t')].map((x) => x.textContent).join('');
+        lin[colIdx(c.getAttribute('r'))] = val;
+      });
+      return lin;
+    });
+    const cab = [...(L[0] || [])].map((x) => String(x ?? '').trim().toLowerCase());
+    const ix = (nome) => cab.indexOf(nome.toLowerCase());
+    const iNome = ix('Activity Name'); const iBud = ix('Budgeted Nonlabor Units'); const iCampo = ix('Spreadsheet Field');
+    if (iNome < 0 || iBud < 0 || iCampo < 0) continue;
+    const iId = ix('Activity ID'); const iIni = ix('Start'); const iFim = ix('Finish'); const iAct = ix('Actual Nonlabor Units');
+    const meses = []; for (let k = iCampo + 1; k < L[0].length; k += 1) { const d = cronData(L[0][k]); meses[k] = d ? d.slice(0, 7) : ''; }
+    const titulo = String((L[1] || [])[iNome] || '');
+    const dd = titulo.match(/(\d{2})[-/.](\d{2})[-/.](\d{4})/) || arquivo.name.match(/(\d{2})[-/.](\d{2})[-/.](\d{4})/);
+    const ativ = [];
+    L.forEach((lin, i) => {
+      if (!i || !lin || (iId >= 0 && lin[iId])) return; // só os agrupadores da EAP
+      const bud = nX(lin[iBud]); if (!(bud > 0)) return;
+      const rem = {}; meses.forEach((m, k) => { if (m && lin[k]) { const v = nX(lin[k]); if (v) rem[m] = r2((rem[m] || 0) + v); } });
+      ativ.push({ n: i + 1, nome: String(lin[iNome] || '').trim(), ini: cronData(lin[iIni]), fim: cronData(lin[iFim]), bud: r2(bud), act: r2(nX(lin[iAct])), rem });
+    });
+    if (ativ.length) return { arquivo: arquivo.name, aba: a.nome, dataDate: dd ? `${dd[3]}-${dd[2]}-${dd[1]}` : '', titulo, importadoEm: agoraLocal(), ativ };
+  }
+  throw new Error('Não encontrei a aba do cronograma (colunas Activity Name, Budgeted Nonlabor Units e Spreadsheet Field).');
+}
+
+/** Acha a atividade da referência no cronograma atual (mesmo nome; desempata pelo orçado e pela linha). */
+function cronAtiv(ref) {
+  const C = cronDB(); if (!C || !ref) return null;
+  const cand = C.ativ.filter((a) => a.nome === ref.nome); if (!cand.length) return null;
+  const dist = (a) => Math.abs(a.bud - num(ref.bud)) * 1e3 + Math.abs(a.n - (ref.n || 0));
+  return cand.reduce((b, a) => (dist(a) < dist(b) ? a : b));
+}
+const MODOS_CRON = [['cron', 'Pelo cronograma'], ['inicio', 'Saldo no 1º mês'], ['fim', 'Saldo no último mês'], ['mensal', 'Valor unitário por mês'], ['fora', 'Fora da previsão']];
+function modoPadraoCron(it) {
+  const d = norm(it.descricao);
+  if (/desmobiliz/.test(d)) return 'fim';
+  if (/mobiliz/.test(d)) return 'inicio';
+  if (/^m[eê]s$/i.test(String(it.unidade || '').trim()) || /^ato$/.test(d)) return 'mensal';
+  return 'cron';
+}
+/** Vínculos sugeridos (contratos sem critério de medição definido no contrato). */
+const CRON_SUGEST = [
+  { forn: /nautica/, ativ: [{ nome: 'Dragagem (Cota)', bud: 35653133.13, n: 2853 }] },
+  { forn: /atena/, ativ: [{ nome: 'Cravação estacas Ø 1219 mm', bud: 133245384, n: 1478 }, { nome: 'Cravação de estacas Ø 1219 mm', bud: 11509042, n: 3778 }] },
+  { forn: /sondosolo/, ativ: [{ nome: 'Estaca Raiz', bud: 4575001.98, n: 1390 }, { nome: 'Estacas Raiz Ø 410', bud: 2557758, n: 3735 }] },
+  { forn: /geosea/, ativ: [{ nome: 'Sondagem', bud: 1, n: 695 }] },
+  { forn: /^exe /, ativ: [{ nome: 'Detalhamento de Engenharia', bud: 7853054.75, n: 681 }] },
+];
+
+function novaPrevBase(c) {
+  return { ctId: c.id, metodo: '', permIni: c.data || '', permFim: '', permTxt: '', pagDias: 30, pagTxt: '', base: '', alerta: '', fontes: [], meds: [] };
+}
+
+/** Recalcula as medições futuras do contrato pela curva das atividades vinculadas. */
+function gerarPrevCron(c, p) {
+  const C = cronDB(); if (!C || !p.cron) return p;
+  const pd = padraoPrev(); const r = ctResumo(c);
+  const refs = (p.cron.ativ || []).map((ref) => ({ ref, a: cronAtiv(ref) }));
+  const ok = refs.filter((x) => x.a); const falta = refs.filter((x) => !x.a).map((x) => x.ref.nome);
+  const curva = {}; ok.forEach(({ a }) => Object.entries(a.rem).forEach(([m, v]) => { curva[m] = (curva[m] || 0) + v; }));
+  const tot0 = Object.values(curva).reduce((s, v) => s + (v > 0 ? v : 0), 0);
+  const mesesC = Object.keys(curva).filter((m) => curva[m] > 0 && curva[m] >= tot0 * 0.0005).sort(); // ignora resíduos (< 0,05%)
+  const totRem = mesesC.reduce((s, m) => s + curva[m], 0);
+  const bud = ok.reduce((s, x) => s + x.a.bud, 0); const act = ok.reduce((s, x) => s + x.a.act, 0);
+  const val = {}; const memo = {};
+  const add = (m, v, txt) => { if (!(v > 0.009)) return; val[m] = r2((val[m] || 0) + v); (memo[m] = memo[m] || []).push(txt); };
+  const sItens = c.itens.map((it) => ({ it, modo: (p.cron.itens || {})[it.id] || modoPadraoCron(it), saldo: r2(itemCalc(c, it).contratado - medidoItem(c.id, it.id)) })).filter((x) => x.saldo > 0.009);
+  const sCron = r2(sItens.filter((x) => x.modo === 'cron').reduce((s, x) => s + x.saldo, 0));
+  const m0 = mesesC[0] || (C.dataDate || hojeISO()).slice(0, 7); const mF = mesesC[mesesC.length - 1] || m0;
+  if (sCron > 0 && totRem > 0) {
+    let acum = 0;
+    mesesC.forEach((m, i) => {
+      const sh = curva[m] / totRem; const v = i === mesesC.length - 1 ? r2(sCron - acum) : r2(sCron * sh); acum = r2(acum + v);
+      add(m, v, `${formatarNumero(sh * 100, 2)}% do avanço restante do cronograma × ${moeda(sCron)}`);
+    });
+  }
+  sItens.forEach(({ it, modo, saldo }) => {
+    if (modo === 'inicio') add(m0, saldo, `${it.descricao}: saldo no início`);
+    else if (modo === 'fim') add(mF, saldo, `${it.descricao}: saldo ao fim das atividades`);
+    else if (modo === 'mensal') {
+      const vm = num(it.vu) > 0 ? num(it.vu) : saldo; let rest = saldo; let m = m0;
+      while (rest > 0.009) { const v = r2(Math.min(vm, rest)); add(m, v, `${it.descricao}: ${moeda(v)}/mês`); rest = r2(rest - v); m = somaMes(m, 1); }
+    }
+  });
+  let k = ordemMed(c.id).length;
+  p.meds = Object.keys(val).sort().map((m) => {
+    k += 1; const ini = dataDia(somaMes(m, -1), pd.diaIni); const fim = dataDia(m, pd.diaFim);
+    return {
+      num: String(k).padStart(2, '0'), ini, fim, comp: m, pag: somaDias(fim, Number(p.pagDias) || 30).slice(0, 7), valor: val[m],
+      pct: r.contratado ? Math.round((val[m] / r.contratado) * 1e6) / 1e4 : null,
+      pctCron: totRem && curva[m] ? Math.round((curva[m] / totRem) * 1e6) / 1e4 : 0,
+      pctFis: bud && curva[m] ? Math.round((curva[m] / bud) * 1e6) / 1e4 : 0,
+      memoria: memo[m].join(' + '), cond: '',
+    };
+  });
+  const nomes = ok.map((x) => x.a.nome).join(' + ') || '—';
+  p.metodo = 'Avanço do cronograma';
+  p.permIni = ok.length ? ok.map((x) => x.a.ini).filter(Boolean).sort()[0] || p.permIni : p.permIni;
+  p.permFim = ok.length ? ok.map((x) => x.a.fim).filter(Boolean).sort().pop() || p.permFim : p.permFim;
+  p.base = `Cronograma com data date ${dt(C.dataDate)} (${C.arquivo}, aba ${C.aba}): ${nomes}. Orçado ${moeda(bud)}, realizado ${formatarNumero(bud ? (act / bud) * 100 : 0, 1)}%. `
+    + `Saldo dos itens por produção (${moeda(sCron)}) distribuído pelo % de avanço restante de cada mês; mobilização no 1º mês, desmobilização no último, itens mensais pelo valor unitário.`;
+  p.alerta = falta.length ? `Atividade(s) não encontrada(s) no cronograma importado: ${falta.join(', ')}. Revise o vínculo.` : (mesesC.length ? '' : 'As atividades vinculadas não têm avanço restante no cronograma.');
+  p.cron.dataDate = C.dataDate; p.cron.bud = r2(bud); p.cron.act = r2(act);
+  p.ref = { contratado: r.contratado, acumulado: r.medido, saldo: r.saldo };
+  p.editadoEm = agoraLocal(); p.editadoPor = operador || 'Setor de medição';
+  return p;
+}
+
+function salvarPrev(p) { const P = prevDB(); const i = P.itens.findIndex((x) => x.ctId === p.ctId); if (i >= 0) P.itens[i] = p; else P.itens.push(p); }
+
+/** Recalcula todos os contratos vinculados; com sugerir=true, cria os vínculos sugeridos que ainda não existem. */
+function recalcularCron({ sugerir = false } = {}) {
+  let novos = 0; let n = 0;
+  S.contratos.forEach((c) => {
+    let p = prevDe(c.id);
+    if (sugerir && !(p && p.cron)) {
+      const sg = CRON_SUGEST.find((s) => s.forn.test(norm(c.fornecedor)));
+      if (sg && sg.ativ.some((ref) => cronAtiv(ref))) { p = p ? JSON.parse(JSON.stringify(p)) : novaPrevBase(c); p.cron = { ativ: sg.ativ.map((x) => ({ ...x })), itens: {} }; novos += 1; }
+    }
+    if (p && p.cron) { gerarPrevCron(c, p); salvarPrev(p); n += 1; }
+  });
+  return { n, novos };
+}
+
+function importarCronograma() {
+  const entrada = h('input', { type: 'file', accept: '.xlsx,.xlsm', class: 'ctc-hidden' });
+  entrada.addEventListener('change', async () => {
+    const f = entrada.files[0]; if (!f) return;
+    try {
+      const C = await lerCronogramaXlsx(f);
+      S.cronograma = C;
+      const { n, novos } = recalcularCron({ sugerir: true });
+      alterou();
+      toast.sucesso('Cronograma importado', `${C.ativ.length} atividades (data date ${dt(C.dataDate)}). ${n} contrato(s) recalculado(s)${novos ? `, ${novos} vínculo(s) sugerido(s) criado(s)` : ''}.`);
+    } catch (e) { toast.erro('Não foi possível importar o cronograma', String(e.message || e)); }
+  });
+  document.body.append(entrada); entrada.click(); setTimeout(() => entrada.remove(), 60000);
+}
+
+/** Tela de vínculo contrato × atividades do cronograma. */
+function editarVinculoCron(c) {
+  const C = cronDB();
+  if (!C) { toast.erro('Sem cronograma', 'Importe o cronograma na aba Previsão antes de vincular.'); return; }
+  const atual = prevDe(c.id);
+  const sel = new Map(((atual && atual.cron && atual.cron.ativ) || []).map((ref) => { const a = cronAtiv(ref); return [a ? a.n : `x${ref.nome}`, a || ref]; }));
+  const modos = { ...((atual && atual.cron && atual.cron.itens) || {}) };
+  const busca = h('input', { class: 'ctc-input ctc-input--sm', placeholder: 'Buscar atividade da EAP (ex.: dragagem, estaca raiz)' });
+  const lista = h('div', { style: { maxHeight: '260px', overflow: 'auto', border: '1px solid var(--ctc-neutral-200,#e2e8f0)', borderRadius: '6px' } });
+  const escolhidas = h('div', { class: 'ctc-stack', style: { gap: '4px' } });
+  const pctR = (a) => formatarNumero(a.bud ? (a.act / a.bud) * 100 : 0, 1);
+  const linhaAtiv = (a) => `${a.nome} · ${dt(a.ini)} a ${dt(a.fim)} · orçado ${moeda(a.bud)} · realizado ${pctR(a)}%`;
+  function desenhar() {
+    const q = norm(busca.value);
+    const itens = C.ativ.filter((a) => !q || norm(a.nome).includes(q)).slice(0, 80);
+    lista.replaceChildren(...itens.map((a) => {
+      const cb = h('input', { type: 'checkbox', checked: sel.has(a.n) });
+      cb.addEventListener('change', () => { if (cb.checked) sel.set(a.n, a); else sel.delete(a.n); desenhar(); });
+      return h('label', { style: { display: 'flex', gap: '8px', padding: '4px 8px', fontSize: '12px', cursor: 'pointer', borderBottom: '1px solid var(--ctc-neutral-100,#f1f5f9)' } }, cb, h('span', {}, linhaAtiv(a)));
+    }));
+    escolhidas.replaceChildren(...(sel.size ? [...sel.values()].map((a) => h('div', { class: 'ctc-text-sm' }, '✓ ', a.bud != null && a.n ? linhaAtiv(a) : `${a.nome} (não encontrada)`)) : [textoPequeno('Nenhuma atividade vinculada.')]));
+  }
+  busca.addEventListener('input', desenhar); desenhar();
+  const selModo = (it) => { const s = h('select', { class: 'ctc-select ctc-select--sm' }, MODOS_CRON.map(([v, t]) => h('option', { value: v, selected: (modos[it.id] || modoPadraoCron(it)) === v }, t))); s.addEventListener('change', () => { modos[it.id] = s.value; }); return s; };
+  const tabItens = tabelaEditavel([['Item'], ['Descrição'], ['Saldo', 1], ['Como prever o saldo']],
+    h('tbody', {}, c.itens.map((it) => h('tr', {}, h('td', {}, it.codigo), h('td', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, it.descricao),
+      h('td', { class: 'ctc-col--num' }, moeda(r2(itemCalc(c, it).contratado - medidoItem(c.id, it.id)))), h('td', {}, selModo(it))))));
+  const corpo = h('div', { class: 'ctc-stack' },
+    criarAlerta({ tipo: 'info', mensagem: `Cronograma ${C.arquivo} · data date ${dt(C.dataDate)}. A previsão deste contrato passa a seguir o % de avanço restante, mês a mês, das atividades marcadas. Use só para contratos que não definem como serão medidos.` }),
+    h('div', {}, h('div', { class: 'ctc-text-xs ctc-text-muted' }, 'Atividades vinculadas'), escolhidas),
+    busca, lista,
+    h('div', { class: 'ctc-text-xs ctc-text-muted' }, 'Itens do contrato'), tabItens);
+  criarModal({
+    titulo: `Vínculo com o cronograma – ${numCt(c)} ${c.fornecedor}`, tamanho: 'xl', destruirAoFechar: true, conteudo: corpo,
+    acoes: [
+      ...(atual && atual.cron ? [{ texto: 'Desvincular', variante: 'ghost', onClick: () => { const p = JSON.parse(JSON.stringify(atual)); delete p.cron; p.metodo = `${p.metodo} (desvinculado do cronograma)`; salvarPrev(p); alterou(); toast.sucesso('Vínculo removido', `${c.fornecedor}: a previsão atual foi mantida e pode ser editada manualmente.`); } }] : []),
+      { texto: 'Cancelar', variante: 'ghost' },
+      {
+        texto: 'Salvar e recalcular', variante: 'primary',
+        onClick: () => {
+          if (!sel.size) { toast.erro('Sem atividades', 'Marque ao menos uma atividade do cronograma.'); return false; }
+          const p = atual ? JSON.parse(JSON.stringify(atual)) : novaPrevBase(c);
+          p.cron = { ativ: [...sel.values()].map((a) => ({ nome: a.nome, bud: a.bud, n: a.n })), itens: modos };
+          gerarPrevCron(c, p); salvarPrev(p); alterou();
+          toast.sucesso('Previsão recalculada pelo cronograma', `${c.fornecedor}: ${moeda(somaPrev(p))} em ${p.meds.length} medição(ões).`);
+          return true;
+        },
+      },
+    ],
+  }).abrir();
+}
+
+/** Bloco da base de cálculo com as atividades vinculadas e o avanço mês a mês. */
+function blocoCron(p) {
+  const C = cronDB(); if (!p.cron) return null;
+  const refs = (p.cron.ativ || []).map((ref) => ({ ref, a: cronAtiv(ref) }));
+  return h('div', { class: 'ctc-stack', style: { gap: '6px', padding: '8px 10px', border: '1px solid #cfe0ef', borderRadius: '8px', background: '#f1f6fb' } },
+    h('div', { class: 'ctc-text-sm' }, h('b', {}, 'Vínculo com o cronograma'), C ? ` · data date ${dt(C.dataDate)} · ${C.arquivo}` : ' · cronograma não importado'),
+    tabelaEditavel([['Atividade (EAP)'], ['Início'], ['Fim'], ['Orçado', 1], ['Realizado', 1]],
+      h('tbody', {}, refs.map(({ ref, a }) => h('tr', {}, h('td', {}, ref.nome), h('td', {}, a ? dt(a.ini) : '—'), h('td', {}, a ? dt(a.fim) : '—'),
+        h('td', { class: 'ctc-col--num' }, a ? moeda(a.bud) : 'não encontrada'), h('td', { class: 'ctc-col--num' }, a ? `${formatarNumero(a.bud ? (a.act / a.bud) * 100 : 0, 1)}%` : '—'))))),
+    textoPequeno('"% avanço do mês" = parte do avanço que ainda falta que o cronograma executa naquele mês; "% físico" = avanço do mês sobre o orçado total das atividades.'));
+}
+
 function exportarPrevisaoCsv() {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const nb = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
-  const cab = ['Contrato', 'Fornecedor', 'Valor total', 'Acumulado', 'Saldo', 'Permanência início', 'Permanência fim', 'Medições concluídas', 'Medição atual (BM)', 'Medição atual (valor)', 'Método', 'BM', 'Período início', 'Período fim', 'Competência', 'Pagamento previsto', 'Valor previsto', 'Condição', 'Memória de cálculo', 'Base utilizada'];
+  const cab = ['Contrato', 'Fornecedor', 'Valor total', 'Acumulado consolidado (Jeane)', 'Saldo (medição atual + a medir)', 'Permanência início', 'Permanência fim', 'Medições consolidadas (Jeane)', 'Medição atual – sem assinatura da Jeane (BM)', 'Medição atual – sem assinatura da Jeane (valor)', 'Método', 'BM', 'Período início', 'Período fim', 'Competência', 'Pagamento previsto', 'Valor previsto', 'Condição', 'Memória de cálculo', 'Base utilizada'];
   const rows = [cab.map(q).join(';')];
   S.contratos.forEach((c) => {
-    const r = ctResumo(c); const p = prevDe(c.id); const ms = ordemMed(c.id); const mesAt = hojeISO().slice(0, 7); const at = ms.filter((x) => mesMed(x) === mesAt);
-    const conc = ms.filter((x) => mesMed(x) !== mesAt).map((x) => `BM ${x.numero} ${mesTxt(mesMed(x))} ${moeda(medTotal(x))}`).join(' | ');
-    (p ? p.meds : [null]).forEach((m) => rows.push([numCt(c), c.fornecedor, nb(r.contratado), nb(r.medido), nb(r.saldo), p?.permIni || '', p?.permFim || '', conc, at.map((x) => `BM ${x.numero}`).join(' + '), nb(at.reduce((s2, x) => s2 + medTotal(x), 0)), p?.metodo || 'Sem previsão',
+    if (prevExcluidoCt(c)) return;
+    const r = ctResumo(c); const p = prevDe(c.id); const ms = ordemMed(c.id); const at = ms.filter((x) => !medConsolidada(x));
+    const conc = ms.filter((x) => medConsolidada(x)).map((x) => `BM ${x.numero} ${mesTxt(mesMed(x))} ${moeda(medTotal(x))}`).join(' | ');
+    const emAssC = at.reduce((s2, x) => s2 + medTotal(x), 0);
+    (p ? p.meds : [null]).forEach((m) => rows.push([numCt(c), c.fornecedor, nb(r.contratado), nb(r.medido - emAssC), nb(r.saldo + emAssC), p?.permIni || '', p?.permFim || '', conc, at.map((x) => `BM ${x.numero}`).join(' + '), nb(at.reduce((s2, x) => s2 + medTotal(x), 0)), p?.metodo || 'Sem previsão',
       m?.num || '', m?.ini || '', m?.fim || '', m?.comp || '', m?.pag || '', nb(m?.valor), m?.cond || '', m?.memoria || '', p?.base || ''].map((v, i) => ([2, 3, 4, 9, 16].includes(i) ? v : q(v))).join(';')));
+  });
+  novosDB().itens.forEach((it) => {
+    if (prevExcluidoNovo(it)) return;
+    const g = num(it.valor) || 0;
+    (it.meds && it.meds.length ? it.meds : [null]).forEach((m) => rows.push([it.fornecedor, it.fornecedor, nb(g), nb(0), nb(g), '', it.prazo || '', '', 'Fora do controle', nb(0), `Fora do controle (${TXT_STATUS[it.status] || it.status})`,
+      m?.num || '', m?.ini || '', m?.fim || '', m?.comp || '', m?.pag || '', nb(m?.valor), m?.cond || '', m?.memoria || '', it.basePrev || it.obs || ''].map((v, i) => ([2, 3, 4, 9, 16].includes(i) ? v : q(v))).join(';')));
   });
   baixarArquivo(new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `previsao-medicoes_${hojeISO()}.csv`);
 }
@@ -10106,6 +10599,128 @@ function abrirPeriodosPadrao() {
       },
     }],
   }).abrir();
+}
+
+/* =============================================================================
+   12. CONTRATOS FORA DO CONTROLE (na pasta, ainda sem medição)
+   ========================================================================== */
+const novosDB = () => { S.novosContratos = S.novosContratos || { itens: [] }; S.novosContratos.itens = S.novosContratos.itens || []; return S.novosContratos; };
+const VAR_STATUS = { assinado: 'success', minuta: 'warning', confirmar: 'danger' };
+const TXT_STATUS = { assinado: 'Assinado', minuta: 'Minuta (.doc)', confirmar: 'Confirmar' };
+
+function paginaNovos() {
+  const N = novosDB();
+  const editavel = sessao.obter().perfil !== 'visualizador';
+  const nomesControle = new Set(S.contratos.map((c) => norm(c.fornecedor)));
+  const linhas = N.itens.map((it, i) => ({ it, i, jaTem: [...nomesControle].some((n) => n && (norm(it.fornecedor).includes(n) || n.includes(norm(it.fornecedor.split('(')[0])))) }));
+  const porStatus = (s) => N.itens.filter((x) => x.status === s).length;
+  const valorConhecido = N.itens.reduce((s, x) => s + (num(x.valor) || 0), 0);
+  const mesesPrev = [...new Set(N.itens.flatMap((x) => (x.meds || []).map((m) => m.comp)))].filter(Boolean).sort();
+  const totMes = (mes) => N.itens.reduce((s, x) => s + (x.meds || []).filter((m) => m.comp === mes).reduce((a, m) => a + num(m.valor), 0), 0);
+  const celBM = (m) => (!m ? h('span', { class: 'ctc-text-muted' }, '—') : h('div', { class: m.cond ? 'prev-bm prev-bm--falta' : 'prev-bm prev-bm--atual', title: m.memoria || '' },
+    h('div', { class: 'ctc-num' }, moeda(num(m.valor))), h('div', { style: { fontSize: '11px', whiteSpace: 'normal' } }, m.cond ? m.cond : (m.memoria || '').slice(0, 48))));
+
+  const kpis = h('div', { class: 'ctc-grid ctc-grid--4' },
+    criarKpi({ rotulo: 'Contratos fora do controle', valor: String(N.itens.length), sub: 'na pasta, ainda sem medição' }).elemento,
+    criarKpi({ rotulo: 'Assinados', valor: String(porStatus('assinado')), sub: 'PDF ForSign/ZapSign', variante: 'accent', tema: 1 }).elemento,
+    criarKpi({ rotulo: 'Minutas / a confirmar', valor: String(porStatus('minuta') + porStatus('confirmar')), sub: '.doc ou sem carimbo de assinatura', destaque: 'neutral' }).elemento,
+    criarKpi({ rotulo: 'Previsto nos próximos 3 BMs', valor: moeda(N.itens.reduce((s, x) => s + (x.meds || []).reduce((a, m) => a + num(m.valor), 0), 0)), sub: 'bruto; inclui estimativas por unidade e minutas (condicionadas)', variante: 'accent', tema: 1 }).elemento);
+
+  const tabela = criarTabela({
+    dados: linhas, porPagina: 0, listrada: true, altura: 'auto', camposBusca: [],
+    colunas: [
+      { campo: 'forn', titulo: 'Fornecedor', fixa: true, render: (_, l) => h('div', {}, h('b', {}, l.it.fornecedor), l.it.cnpj ? h('div', { class: 'ctc-text-xs ctc-text-muted' }, l.it.cnpj) : null, l.jaTem ? h('div', {}, criarBadge({ texto: 'nome parecido já no controle', variante: 'info' })) : null) },
+      { campo: 'objeto', titulo: 'Objeto', render: (_, l) => h('div', { class: 'ctc-text-sm', style: { whiteSpace: 'normal', maxWidth: '320px' } }, l.it.objeto) },
+      { campo: 'valor', titulo: 'Valor', render: (_, l) => h('div', { class: 'ctc-text-sm', style: { whiteSpace: 'normal', maxWidth: '220px' } }, l.it.valorTxt || (l.it.valor ? moeda(l.it.valor) : '—')) },
+      { campo: 'prazo', titulo: 'Prazo / vigência', render: (_, l) => h('div', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, l.it.prazo || '—') },
+      { campo: 'medicao', titulo: 'Medição', render: (_, l) => h('div', { class: 'ctc-text-sm' }, l.it.medicao || '—') },
+      { campo: 'status', titulo: 'Situação', render: (_, l) => criarBadge({ texto: TXT_STATUS[l.it.status] || l.it.status, variante: VAR_STATUS[l.it.status] || 'neutral' }) },
+      ...mesesPrev.map((mes, idx) => ({ campo: `bm_${mes}`, titulo: `${idx + 1}º BM · ${mesTxt(mes)}`, tipo: 'moeda', total: 'soma', render: (_, l) => celBM((l.it.meds || []).find((m) => m.comp === mes)) })),
+      {
+        campo: 'acoes', titulo: '', ordenavel: false, classe: 'ctc-col--actions',
+        render: (_, l) => h('div', { class: 'ctc-btn-group' },
+          criarBotao({ texto: 'Detalhes', variante: 'ghost', tamanho: 'sm', onClick: () => abrirNovo(l.i) }),
+          editavel ? criarBotao({ icone: 'editar', variante: 'ghost', tamanho: 'sm', titulo: 'Editar', onClick: () => editarNovo(l.i) }) : null,
+          editavel ? criarBotao({ icone: 'lixeira', variante: 'ghost', tamanho: 'sm', titulo: 'Remover da lista', onClick: () => removerNovo(l.i) }) : null),
+      },
+    ],
+  });
+
+  const grupos = ['assinado', 'minuta', 'confirmar'].map((st) => {
+    const its = linhas.filter((l) => l.it.status === st);
+    if (!its.length) return null;
+    return h('details', { class: 'ctc-card', style: { padding: '8px 14px' }, open: st === 'assinado' },
+      h('summary', { style: { cursor: 'pointer' } }, h('b', {}, TXT_STATUS[st]), ' ', criarBadge({ texto: String(its.length), variante: VAR_STATUS[st] })),
+      h('div', { class: 'ctc-stack', style: { marginTop: '8px' } }, its.map((l) => blocoNovo(l.it))));
+  }).filter(Boolean);
+
+  return [
+    alertaFicticio(),
+    criarAlerta({ tipo: 'info', titulo: 'Contratos na pasta ainda sem medição', mensagem: `${N.nota || ''}${N.atualizado ? ` Varredura em ${fdt(N.atualizado)}.` : ''}` }),
+    kpis,
+    h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, 'Lista de contratos fora do controle')),
+    criarPainel({ titulo: 'Contratos encontrados na pasta', icone: 'documento', semEspaco: true, conteudo: tabela.elemento }).elemento,
+    h('div', { class: 'ctc-toolbar' }, h('span', { class: 'ctc-title-panel' }, 'Base de cada contrato')),
+    h('div', { class: 'ctc-stack' }, grupos),
+  ];
+}
+
+function blocoNovo(it) {
+  const campo = (rot, val) => (val ? h('div', {}, h('div', { class: 'ctc-text-xs ctc-text-muted' }, rot), h('div', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, val)) : null);
+  return h('div', { class: 'ctc-card', style: { padding: '10px 14px' } },
+    h('div', { class: 'ctc-cluster' }, h('b', {}, it.fornecedor), criarBadge({ texto: TXT_STATUS[it.status] || it.status, variante: VAR_STATUS[it.status] || 'neutral' }), it.cnpj ? h('span', { class: 'ctc-text-xs ctc-text-muted' }, it.cnpj) : null),
+    h('div', { class: 'ctc-grid ctc-grid--2', style: { marginTop: '6px' } },
+      campo('Objeto', it.objeto), campo('Valor', it.valorTxt || (it.valor ? moeda(it.valor) : '—')),
+      campo('Prazo / vigência', it.prazo), campo('Medição', it.medicao), campo('Pagamento', it.pagamento)),
+    (it.meds && it.meds.length) ? h('div', {},
+      h('div', { class: 'ctc-text-xs ctc-text-muted', style: { margin: '6px 0 2px' } }, 'Previsão das 3 próximas medições'),
+      it.basePrev ? h('div', { class: 'ctc-text-xs', style: { marginBottom: '4px', whiteSpace: 'normal' } }, it.basePrev) : null,
+      tabelaEditavel([['BM'], ['Período'], ['Competência'], ['Pagamento'], ['Valor', 1], ['Memória / condição']],
+        h('tbody', {}, it.meds.map((m) => h('tr', {}, h('td', {}, m.num), h('td', {}, `${dt(m.ini)} a ${dt(m.fim)}`), h('td', {}, mesTxt(m.comp)), h('td', {}, mesTxt(m.pag)),
+          h('td', { class: 'ctc-col--num' }, moeda(num(m.valor))), h('td', { class: 'ctc-text-sm', style: { whiteSpace: 'normal' } }, [m.memoria, m.cond].filter(Boolean).join(' · ')))))) ) : null,
+    it.obs ? criarAlerta({ tipo: it.status === 'assinado' ? 'info' : 'warning', mensagem: it.obs }) : null,
+    it.doc ? h('div', {}, h('div', { class: 'ctc-text-xs ctc-text-muted' }, 'Documento'), h('div', { class: 'ctc-text-xs' }, it.doc)) : null);
+}
+
+function abrirNovo(i) {
+  const it = novosDB().itens[i];
+  criarModal({ titulo: it.fornecedor, tamanho: 'lg', destruirAoFechar: true, conteudo: blocoNovo(it),
+    acoes: [...(sessao.obter().perfil !== 'visualizador' ? [{ texto: 'Editar', variante: 'outline', onClick: () => { setTimeout(() => editarNovo(i), 0); } }] : []), { texto: 'Fechar', variante: 'primary' }] }).abrir();
+}
+
+async function removerNovo(i) {
+  const it = novosDB().itens[i];
+  if (!(await confirmar({ titulo: 'Remover da lista', mensagem: `Remover "${it.fornecedor}" da lista de contratos fora do controle?`, textoConfirmar: 'Remover', perigo: true }))) return;
+  novosDB().itens.splice(i, 1); alterou(); toast.sucesso('Removido', it.fornecedor);
+}
+
+function editarNovo(i) {
+  const N = novosDB(); const nv = i == null; const it = nv ? { status: 'minuta' } : JSON.parse(JSON.stringify(N.itens[i]));
+  const inp = (v) => h('input', { class: 'ctc-input', value: v ?? '' });
+  const ta = (v) => h('textarea', { class: 'ctc-textarea', rows: 2 }, v || '');
+  const sel = criarSelectSimples({ opcoes: [{ valor: 'assinado', texto: 'Assinado' }, { valor: 'minuta', texto: 'Minuta (.doc)' }, { valor: 'confirmar', texto: 'Confirmar' }], valor: it.status || 'minuta', todos: null });
+  const f = { fornecedor: inp(it.fornecedor), cnpj: inp(it.cnpj), objeto: ta(it.objeto), valor: inp(it.valor || ''), valorTxt: inp(it.valorTxt), prazo: inp(it.prazo), medicao: inp(it.medicao), pagamento: inp(it.pagamento), doc: ta(it.doc), obs: ta(it.obs) };
+  const corpo = h('div', { class: 'ctc-form-grid' },
+    campoLivre('Fornecedor', f.fornecedor, true), campoLivre('CNPJ', f.cnpj), campoLivre('Situação', sel),
+    campoLivre('Objeto', f.objeto, true), campoLivre('Valor global (número, opcional)', f.valor), campoLivre('Valor (texto)', f.valorTxt),
+    campoLivre('Prazo / vigência', f.prazo), campoLivre('Medição', f.medicao), campoLivre('Pagamento', f.pagamento),
+    campoLivre('Documento (caminho na pasta)', f.doc, true), campoLivre('Observação', f.obs, true));
+  criarModal({ titulo: nv ? 'Novo contrato fora do controle' : `Editar – ${it.fornecedor}`, tamanho: 'xl', destruirAoFechar: true, conteudo: corpo,
+    acoes: [{ texto: 'Cancelar', variante: 'ghost' }, { texto: 'Salvar', variante: 'primary', onClick: () => {
+      const novo = { fornecedor: f.fornecedor.value.trim(), cnpj: f.cnpj.value.trim(), objeto: f.objeto.value.trim(), valor: num(f.valor.value) || 0, valorTxt: f.valorTxt.value.trim(), prazo: f.prazo.value.trim(), medicao: f.medicao.value.trim(), pagamento: f.pagamento.value.trim(), status: sel.value || 'minuta', doc: f.doc.value.trim(), obs: f.obs.value.trim() };
+      if (!novo.fornecedor) return false;
+      if (nv) N.itens.push(novo); else N.itens[i] = novo;
+      alterou(); toast.sucesso('Salvo', novo.fornecedor); return true;
+    } }] }).abrir();
+}
+
+function exportarNovosCsv() {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const nb = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
+  const cab = ['Fornecedor', 'CNPJ', 'Objeto', 'Valor', 'Prazo/vigência', 'Medição', 'Pagamento', 'Situação', '1º BM comp', '1º BM valor', '2º BM comp', '2º BM valor', '3º BM comp', '3º BM valor', 'Base da previsão', 'Documento', 'Observação'];
+  const rows = [cab.map(q).join(';')];
+  novosDB().itens.forEach((it) => { const m = it.meds || []; rows.push([q(it.fornecedor), q(it.cnpj), q(it.objeto), q(it.valorTxt || (it.valor ? moeda(it.valor) : '')), q(it.prazo), q(it.medicao), q(it.pagamento), q(TXT_STATUS[it.status] || it.status), q(m[0]?.comp || ''), nb(m[0]?.valor), q(m[1]?.comp || ''), nb(m[1]?.valor), q(m[2]?.comp || ''), nb(m[2]?.valor), q(it.basePrev || ''), q(it.doc), q(it.obs)].join(';')); });
+  baixarArquivo(new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `contratos-fora-do-controle_${hojeISO()}.csv`);
 }
 
 function abrirAplicativo({ perfil, usuario, base, nomeArquivo }) {
@@ -10212,7 +10827,7 @@ function abrirAplicativo({ perfil, usuario, base, nomeArquivo }) {
           itens: [{ id: ID_MENU_CONTROLADOR, texto: 'Controlador', emoji: '🛠️' }],
         },
       ],
-      rodape: 'Controle de Medição v2.4.0 · CTC App Standard v1.9',
+      rodape: 'Controle de Medição v2.5.0 · CTC App Standard v1.9',
     },
     paginas: {
       painel: {
@@ -10231,7 +10846,7 @@ function abrirAplicativo({ perfil, usuario, base, nomeArquivo }) {
       },
       previsao: {
         titulo: 'Previsão de medições', caminho: ['Controle'],
-        acoes: [{ texto: 'Exportar Excel (CSV)', icone: 'download', variante: 'outline', onClick: exportarPrevisaoCsv }],
+        acoes: [{ texto: 'Exportar Excel', icone: 'download', variante: 'outline', onClick: exportarAMedirXlsx }],
         render: paginaPrevisao,
       },
       contatos: {
@@ -10273,7 +10888,7 @@ const telaEntrada = criarTelaEntrada({
   armazenamento,
   criarBaseNova,
   textoBaseInicial: 'Nenhum arquivo carregado ainda: será usada a base de demonstração com dados fictícios.',
-  rodape: 'Controle de Medição v2.4.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
+  rodape: 'Controle de Medição v2.5.0 — acesso pelo login do Portal KZ (ou pelos controladores da base).',
   nomeControle: NOME_CONTROLE_KZ,
   onLoginPortal: async () => { await garantirLoginKZ(); return true; },
   rotuloImportar: '1. Importar dados da obra',
